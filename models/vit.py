@@ -18,8 +18,11 @@ class PatchEmbedding(nn.Module):
             nn.Conv2d(d_model, d_model, kernel_size=3, stride=patch_size, padding=1)
         )
 
+        H, W = img_size
+        self.grid_size = (H // patch_size, W // patch_size)
+        num_patches = self.grid_size[0] * self.grid_size[1]
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
-        self.pos_embed = None  # Will initialize in forward pass
+        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + num_patches, d_model))
     
     def forward(self, x):
         B = x.shape[0]
@@ -31,7 +34,6 @@ class PatchEmbedding(nn.Module):
         cls_token = self.cls_token.expand(B, -1, -1)
         x = torch.cat([cls_token, x], dim=1)  # (B, 1 + n_patches, d_model)
 
-        # Lazy initialize pos_embed on first forward
         if self.pos_embed is None or self.pos_embed.shape[1] != x.shape[1]:
             self.pos_embed = nn.Parameter(torch.zeros(1, x.shape[1], self.d_model).to(x.device))
 
@@ -58,7 +60,7 @@ class TransformerBlock(nn.Module):
         x = x + self.ff(self.norm2(x))
         return x
 
-class VisionTransformer(nn.Module):
+class ViT(nn.Module):
     def __init__(self, img_size=(28, 28), patch_size=7, in_channels=1, num_classes=10,
                  d_model=64, num_heads=4, num_layers=4, d_ff=128, dropout=0.1):
         super().__init__()
@@ -94,5 +96,4 @@ class VisionTransformer(nn.Module):
         return self.head(x[:, 0])  # CLS token
 
 def create_model(**kwargs):
-    """Create and return a VisionTransformer model with directly passed kwargs."""
-    return VisionTransformer(**kwargs)
+    return ViT(**kwargs)
