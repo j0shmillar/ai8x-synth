@@ -11,8 +11,7 @@ Load contents of a checkpoint files and save them in a quantized format.
 import signal
 import sys
 
-from izer.quantize import main
-
+from src.izer.quantize import main
 
 def signal_handler(
         _signal,
