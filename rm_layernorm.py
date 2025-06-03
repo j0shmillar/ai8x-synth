@@ -157,6 +157,7 @@ if __name__ == "__main__":
         dropout=dropout
     ).to(device)
 
+    # TODO: MOVE TO UTILS
     def resize_pos_embed(pos_embed_checkpoint, pos_embed_model):
         _ = pos_embed_checkpoint[:, :1]
         patch_pos_embed_checkpoint = pos_embed_checkpoint[:, 1:]

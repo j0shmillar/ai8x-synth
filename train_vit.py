@@ -3,11 +3,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from models.vit import VisionTransformer
-from tqdm import tqdm
-import os
 
-# Hyperparameters and settings (hardcoded)
+import os
+from tqdm import tqdm
+
+from models.vit import ViT
+
 input_size = (28, 28)
 patch_size = 3
 input_channels = 1
@@ -77,8 +78,7 @@ def validate(model, val_loader, criterion, device):
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Create model directly
-    model = VisionTransformer(
+    model = ViT(
         img_size=input_size,
         patch_size=patch_size,
         in_channels=input_channels,
