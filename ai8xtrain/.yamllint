@@ -1,7 +1,0 @@
----
-extends: default
-rules:
-  line-length: {max: 1024}
-  new-lines:
-    type: platform
-  new-line-at-end-of-file: enable

@@ -14,7 +14,7 @@ patch_size = 3
 input_channels = 1
 d_model = 64
 num_heads = 4
-num_layers = 6
+num_layers = 3
 d_ff = 128
 dropout = 0.1
 num_classes = 10
@@ -122,13 +122,13 @@ def main():
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         scheduler.step()
 
-        if val_acc > best_acc:
-            best_acc = val_acc
-            torch.save({
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'arch': 'ai85_vit',
-            }, checkpoint_file)
+        # if val_acc > best_acc:
+        #     best_acc = val_acc
+        torch.save({
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'arch': 'ai85_vit',
+        }, checkpoint_file)
 
         print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
