@@ -180,17 +180,17 @@ def load(
                         # to be opn.CONVTRANSPOSE2D. We should be able to get this
                         # from the op_type Conv plus shape?
                         if operator[seq] == opn.CONVTRANSPOSE2D:
-                            # For ConvTranspose2d, flip the weights as follows:
                             w = np.flip(w, axis=(2, 3)).swapaxes(0, 1)
 
-                        input_channels.append(w.shape[1])  # Input channels
-                        output_channels.append(w.shape[0])  # Output channels
+                        input_channels.append(w.shape[1])  
+                        output_channels.append(w.shape[0]) 
 
                         if w.ndim == 2:  # MLP
+                            kernel_size_onnx[seq] = [1,1] # TEMP
                             if kernel_size_onnx[seq][0] != 1 or kernel_size_onnx[seq][1] != 1:
                                 eprint(f'The `kernel_size` for the MLP layer {seq} should '
                                        f'be set to 1x1 instead of '
-                                       f'{kernel_size[seq][0]}x{kernel_size[seq][1]}.',
+                                       f'{kernel_size_onnx[seq][0]}x{kernel_size_onnx[seq][1]}.',
                                        exit_code=None)
                                 error_exit = True
                         elif w.ndim == 3:  # 1D
@@ -198,7 +198,7 @@ def load(
                                or kernel_size_onnx[seq][1] != 1:
                                 eprint(f'The `kernel_size` for the 1D layer {seq} should '
                                        f'be set to {w.shape[2]}x1 instead of '
-                                       f'{kernel_size[seq][0]}x{kernel_size[seq][1]}.',
+                                       f'{kernel_size_onnx[seq][0]}x{kernel_size_onnx[seq][1]}.',
                                        exit_code=None)
                                 error_exit = True
                         elif w.ndim == 4:  # 2D
@@ -206,7 +206,7 @@ def load(
                                or kernel_size_onnx[seq][1] != w.shape[3]:
                                 eprint(f'The `kernel_size` for the 2D layer {seq} should '
                                        f'be set to {w.shape[2]}x{w.shape[3]} instead of '
-                                       f'{kernel_size[seq][0]}x{kernel_size[seq][1]}.',
+                                       f'{kernel_size_onnx[seq][0]}x{kernel_size_onnx[seq][1]}.',
                                        exit_code=None)
                                 error_exit = True
 
