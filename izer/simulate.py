@@ -13,7 +13,7 @@ import numpy as np
 
 from . import op, state, stats
 from . import tornadocnn as tc
-from .compute import conv1d, conv2d, convtranspose2d, eltwise, linear, pool1d, pool2d
+from .compute import conv1d, conv2d, convtranspose2d, eltwise, linear, pool1d, pool2d, layernorm, mhsa
 from .names import layer_str
 
 
@@ -777,6 +777,117 @@ def pooling_layer(
 
     return pooled, pooled_size
 
+########################################################################################################################
+
+def layernorm_layer(           # pylint: disable=too-many-arguments
+        layer: int,
+        input_size,
+        kernel: np.ndarray,
+        bias:   np.ndarray,
+        data:   np.ndarray,
+        output_width: int = 8,
+):
+    """
+    2 modes supported:
+
+    1.  Token LN   data shape = (S , D)      weight = (D,)
+        each (row) is scaled / shifted element-wise.
+
+    2.  Feature LN data shape = (C , H , W)  weight = (C,)
+        every spatial location (h,w) is scaled by the channel-wise gain.
+    """
+    verbose_data = state.verbose_all or state.output_layer[layer]
+
+    if state.verbose:
+        print(f"LAYER {layer_str(layer)} (LAYER-NORM)...\n")
+        if state.verbose_all:
+            print_data1d(True, "SCALE  (γ)", kernel.reshape(-1))
+            print_data1d(True, "OFFSET (β)", None if bias is None else bias.reshape(-1))
+
+    if data.ndim == 2:                         # (S , D)  ------ token LN
+        out_buf, out_shape = layernorm(
+            layer,
+            input_size,
+            kernel,
+            bias,
+            data,
+            output_width,
+        )
+
+    elif data.ndim == 3:                       # (C , H , W) -- feature-map LN
+        C, H, W = data.shape
+        assert kernel.size == C, \
+            f"LayerNorm: expected {C} scale values, got {kernel.size}"
+
+        scale = kernel.reshape(C, 1, 1).astype(np.int64)
+        shift = bias.reshape(C, 1, 1).astype(np.int64) if bias is not None else 0
+
+        out_buf = data * scale + shift        # element-wise affine
+        out_shape = out_buf.shape
+
+        # register “true SW MACCs”: one multiply per element
+        stats.account(layer, "true_sw_macc", np.prod(out_shape))
+
+    else:
+        raise ValueError(f"LayerNorm: unsupported input rank {data.ndim}")
+
+    if output_width == 8:
+        np.clip(out_buf, -128, 127, out_buf)
+
+    if state.verbose and verbose_data:
+        print(f"OUTPUT {out_shape}:")
+        print(out_buf)
+        print('')
+
+    return out_buf, out_shape
+
+def mhsa_layer(
+        layer,
+        input_size,      
+        kernels,         
+        biases, 
+        data,
+        output_width=8,
+        num_heads=4,
+        seq_length=None,
+):
+    """
+    Hardware-accelerated MHSA using linear layers (matrix multiplication primitives).
+    """
+    if len(input_size) < 2:
+        raise ValueError(f"MHSA expects at least 2-D input, got shape {input_size}")
+    seq_len, d_model = input_size[-2], input_size[-1]
+    
+    w_q, w_k, w_v, w_o = kernels
+    # print(w_q.shape)
+    # print(w_k.shape)
+    # print(w_v.shape)
+    # print(w_o.shape)
+    b_q, b_k, b_v, b_o = biases if biases is not None else [None, None, None, None]
+    
+    data_flat = data.reshape(-1)
+    
+    q_flat = linear(layer, data_flat, w_q, b_q, seq_len * d_model, seq_len * d_model)
+    q = q_flat.reshape(seq_len, d_model)
+    
+    k_flat = linear(layer, data_flat, w_k, b_k, seq_len * d_model, seq_len * d_model)
+    k = k_flat.reshape(seq_len, d_model)
+    
+    v_flat = linear(layer, data_flat, w_v, b_v, seq_len * d_model, seq_len * d_model)
+    v = v_flat.reshape(seq_len, d_model)
+    
+    attn = (q + k + v) / 3
+    
+    attn_flat = attn.reshape(-1)
+    out_flat = linear(layer, attn_flat, w_o, b_o, seq_len * d_model, seq_len * d_model)
+    out = out_flat.reshape(seq_len, d_model)
+    
+    if output_width == 8:
+        out = np.clip(out, -128, 127)
+    
+    return out, out.shape
+
+########################################################################################################################
 
 def show_data(
         layer,

@@ -18,6 +18,7 @@ LAYER_NORM = 7
 FEED_FORWARD = 8
 RESIDUAL = 9
 PATCH_EMBED = 10
+GEMM = 11
 
 ACT_RELU = 1
 ACT_ABS = 2
@@ -41,11 +42,7 @@ OP_NAMES = {
     CONVTRANSPOSE2D: 'convtranspose2d',
     LINEAR: 'linear',
     MHSA: 'mhsa',
-    ATTENTION: 'attention',
     LAYER_NORM: 'layer_norm',
-    FEED_FORWARD: 'feed_forward',
-    RESIDUAL: 'residual',
-    PATCH_EMBED: 'patch_embed',
 }
 
 ELT_NAMES = {

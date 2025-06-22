@@ -1,0 +1,178 @@
+---
+arch: ai85_vit_decomposed
+dataset: MNIST
+
+layers:
+  # -------------------- Patch Embedding --------------------
+  # - name: patch_embed
+  #   operation: patch_embed
+  #   data_format: HWC
+  #   in_channels: 1
+  #   out_channels: 64
+  #   d_model: 64
+  #   patch_size: 3
+  #   out_offset: 0x2000
+  #   processors: 0x0000000000000001  # 1 input channel
+
+  - name: patch_embed.conv.0
+    operation: conv2d
+    kernel_size: 3x3
+    pad: 1
+    activate: ReLU
+    in_channels: 1
+    out_channels: 64
+    out_offset: 0x2000
+    processors: 0x0000000000000001  # 1 input channel (MNIST)
+
+  - name: patch_embed.conv.1
+    operation: conv2d
+    kernel_size: 3x3
+    pad: 1
+    activate: ReLU
+    in_channels: 64
+    out_channels: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  
+
+  - name: patch_embed.conv.2
+    operation: conv2d
+    kernel_size: 3x3
+    pad: 1
+    activate: ReLU
+    in_channels: 64
+    out_channels: 64
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff 
+
+  # -------------------- Transformer Block 0 --------------------
+  - name: blocks.0.norm1
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.0.attn
+    operation: mhsa
+    num_heads: 4
+    d_model: 64
+    seq_length: 82  # 1 CLS + 9x9 patches
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.0.norm2
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.0.ff.0
+    operation: linear
+    out_channels: 128
+    activate: ReLU
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.0.ff.3
+    operation: linear
+    in_channels: 128
+    out_channels: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 128 input channels (from ff.0)
+
+  # -------------------- Transformer Block 1 --------------------
+  - name: blocks.1.norm1
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.1.attn
+    operation: mhsa
+    num_heads: 4
+    d_model: 64
+    seq_length: 82
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.1.norm2
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.1.ff.0
+    operation: linear
+    out_channels: 128
+    activate: ReLU
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.1.ff.3
+    operation: linear
+    in_channels: 128
+    out_channels: 64
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 128 input channels (from ff.0)
+
+  # -------------------- Transformer Block 2 --------------------
+  - name: blocks.2.norm1
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.2.attn
+    operation: mhsa
+    num_heads: 4
+    d_model: 64
+    seq_length: 82
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.2.norm2
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.2.ff.0
+    operation: linear
+    out_channels: 128
+    activate: ReLU
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.2.ff.3
+    operation: linear
+    in_channels: 128
+    out_channels: 64
+    out_offset: 0x0000
+    processors: 0xffffffffffffffff  # 128 input channels (from ff.0)
+
+  # -------------------- Final Layers --------------------
+  - name: norm
+    operation: layernorm
+    in_channels: 64
+    out_channels: 64
+    d_model: 64
+    out_offset: 0x2000
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: head
+    operation: linear
+    out_channels: 10
+    output_width: 32
+    out_offset: 0x1000
+    processors: 0xffffffffffffffff  # 10 output channels

@@ -498,7 +498,7 @@ def residual(data, residual_data):
     """
     return data + residual_data
 
-def attention_layer(
+def mhsa(
         layer,
         input_size,         # (seq , dim)
         kernel, bias,
@@ -539,7 +539,7 @@ def attention_layer(
         out = np.clip(out, -128, 127)
     return out, out.shape
 
-def layer_norm_layer(
+def layernorm(
         layer,             # layer index for statistics
         input_size,        # (seq , dim)
         kernel, bias,
@@ -616,16 +616,6 @@ def patch_embed_layer(
         cls_token: Optional[np.ndarray] = None,
         pos_embed: Optional[np.ndarray] = None
 ):
-    """
-    Implements PatchEmbedding with three 3x3 conv + ReLU layers, a stride-patch_size
-    final projection, flatten, CLS-token concatenation and positional-embedding add.
-
-    The routine expects:
-      kernels = [w0, w1, w2]     # each as numpy array
-      biases  = [b0, b1, b2]     # may contain None
-    The caller (op dispatcher) must pass the CLS token and positional
-    embedding that belong to this checkpoint.
-    """
     # ---------------- first conv 1→d_model -----------------
     x = conv2d(
         data,
@@ -640,7 +630,7 @@ def patch_embed_layer(
         fractional_stride=(1, 1),
         output_pad=(0, 0),
     )
-    x = np.maximum(0, x)  # ReLU
+    # x = np.maximum(0, x)  # ReLU
 
     # ---------------- second conv d_model→d_model ----------
     x = conv2d(
@@ -656,7 +646,7 @@ def patch_embed_layer(
         fractional_stride=(1, 1),
         output_pad=(0, 0),
     )
-    x = np.maximum(0, x)
+    # x = np.maximum(0, x)
 
     # ---------------- third conv  stride = patch_size ------
     out_h = (x.shape[1] + 2*1 - 3) // patch_size + 1   # pad=1, k=3
@@ -690,5 +680,22 @@ def patch_embed_layer(
 
     # return in (sequence, dim) order expected by later layers
     return tokens, tokens.shape
+
+def gemm_approx(data, weight, bias=None):
+    # collapse any (1,1) spatial dims on weight → shape (C_out, C_in)
+    if weight.ndim == 4:
+        weight2d = weight[:, :, 0, 0]
+    else:
+        weight2d = weight
+    
+    C_in, H, W = data.shape
+    C_out, C_in_w = weight2d.shape
+    assert C_in_w == C_in, f"weight has {C_in_w} in-channels but data has {C_in}"
+    
+    out = np.tensordot(weight2d, data, axes=([1], [0]))  # → (C_out, H, W)
+    
+    if bias is not None:
+        out += bias[:, None, None]
+    return out
 
 ################################################################################################

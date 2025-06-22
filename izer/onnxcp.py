@@ -69,10 +69,14 @@ def process_channels(model, _input, initializers):
     """
     Match model and initializer names from input to find weights.
     """
+    print('process channels')
     if _input in initializers:
         for _init in model.graph.initializer:
+            print(_init.name)
+            print(_input)
             if _input == _init.name:
                 w = numpy_helper.to_array(_init).astype(np.int64)
+                print(w)
                 break
     else:
         w = None
@@ -221,6 +225,8 @@ def load(
                         else:  # conv1d, conv2d, ... - combine input and output channels
                             w = np.reshape(w, (-1, ) + w.shape[2:])
 
+                        print(f'loading {node}')
+                        print(w)
                         weights.append(w)
                         weight_keys.append(_input)
 

@@ -1,0 +1,63 @@
+---
+arch: ai85_vit_decomposed
+dataset: MNIST
+
+layers:
+  # -------------------- Patch Embedding --------------------
+  - name: patch_embed.proj.0
+    operation: conv2d
+    data_format: HWC
+    in_channels: 1
+    out_channels: 64
+    kernel_size: 3x3
+    out_offset: 0x4000
+    processors: 0x0000000000000001  # 1 input channel
+
+  - name: patch_embed.proj.2
+    operation: conv2d
+    data_format: HWC
+    in_channels: 64
+    out_channels: 64
+    kernel_size: 3x3
+    out_offset: 0x2000  # updated out_offset
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: patch_embed.proj.4
+    operation: conv2d
+    data_format: HWC
+    in_channels: 64
+    out_channels: 64
+    kernel_size: 3x3
+    out_offset: 0x0000  # updated out_offset
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  # -------------------- Transformer Block 0-2 --------------------
+  - name: blocks.0.attn
+    operation: gemm
+    in_channels: 64
+    out_channels: 64
+    out_offset: 0x2000  # updated out_offset
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.1.attn
+    operation: gemm
+    in_channels: 64
+    out_channels: 64
+    out_offset: 0x4000  # updated out_offset
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  - name: blocks.2.attn
+    operation: gemm
+    in_channels: 64
+    out_channels: 64
+    out_offset: 0x0000  # updated out_offset
+    processors: 0xffffffffffffffff  # 64 input channels
+
+  # -------------------- Final Layers --------------------
+  - name: head
+    operation: mlp
+    in_channels: 64
+    out_channels: 10
+    output_width: 32
+    out_offset: 0x4000  # updated out_offset
+    processors: 0xffffffffffffffff  # 10 output channels

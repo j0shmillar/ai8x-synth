@@ -362,22 +362,10 @@ def parse(
 
 ######################################################################################################
 
-            elif conv == 'patch_embed':
-                operator[sequence] = op.PATCH_EMBED
-                kernel_size[sequence] = [3, 3]
-                padding[sequence] = [0, 0]
             elif conv == 'mhsa':
                 operator[sequence] = op.MHSA
                 kernel_size[sequence] = [1, 1]
                 padding[sequence] = [0, 0]
-            elif conv == 'multihead_attention':
-                operator[sequence] = op.MHSA
-                kernel_size[sequence] = [1, 1]
-                padding[sequence] = [0, 0]
-            # elif conv == 'attention':
-            #     operator[sequence] = op.ATTENTION
-            #     kernel_size[sequence] = [1, 1]
-            #     padding[sequence] = [0, 0]
             elif conv == 'layer_norm':
                 operator[sequence] = op.LAYER_NORM
                 kernel_size[sequence] = [1, 1]
@@ -386,18 +374,7 @@ def parse(
                 operator[sequence] = op.LAYER_NORM
                 kernel_size[sequence] = [1, 1]
                 padding[sequence] = [0, 0]
-            elif conv == 'feed_forward':
-                operator[sequence] = op.FEED_FORWARD
-                kernel_size[sequence] = [1, 1]
-                padding[sequence] = [0, 0]
-            elif conv == 'ffn':
-                operator[sequence] = op.FEED_FORWARD
-                kernel_size[sequence] = [1, 1]
-                padding[sequence] = [0, 0]
-            elif conv == 'residual':
-                operator[sequence] = op.RESIDUAL
-                eltwise[sequence] = op.ELTWISE_ADD
-                operands[sequence] = 2
+
 ######################################################################################################
             else:
                 error_exit(f'Unknown value "{ll[key]}" for `{key}`', sequence)

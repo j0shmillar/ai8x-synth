@@ -59,7 +59,7 @@ def load(
     final_scale = {}
 
     checkpoint = torch.load(checkpoint_file, map_location='cpu')
-    # print(checkpoint)
+
     print(f'Reading {checkpoint_file} to configure network weights...')
 
     if 'state_dict' not in checkpoint:
@@ -87,8 +87,7 @@ def load(
     
     for k in checkpoint_state.keys():
         # Skip over non-weight and duplicated weight layers
-        while seq < len(operator) and (operator[seq] == op.NONE or bypass[seq]
-                                       or weight_source[seq] is not None):
+        while seq < len(operator) and (operator[seq] == op.NONE or bypass[seq] or weight_source[seq] is not None):
             seq += 1
         param_levels = k.rsplit(sep='.', maxsplit=2)
         if len(param_levels) == 3:
@@ -98,7 +97,7 @@ def load(
         else:
             continue
 
-        if parameter in ['weight']:
+        if 'weight' in parameter: # TODO - check (old: if parameter in ['weight'])
             if layers >= num_conv_layers or seq >= num_conv_layers:
                 continue
             if skip_layers > 0:
@@ -106,6 +105,11 @@ def load(
                 continue
 
             w = checkpoint_state[k].numpy().astype(np.int64)
+
+            print(k)
+            print(w.shape)
+            print("########################")
+             
             w_min, w_max, w_abs = w.min(), w.max(), np.abs(w)
 
             if np.all(w == 0):

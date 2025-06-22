@@ -21,7 +21,7 @@ from izer import tornadocnn as tc
 from izer.eprint import eprint, nprint, wprint
 from izer.names import layer_pfx, layer_str
 from izer.simulate import (conv1d_layer, conv2d_layer, convtranspose2d_layer, eltwise_layer,
-                           passthrough_layer, pooling_layer, print_data, show_data)
+                           passthrough_layer, pooling_layer, layernorm_layer, mhsa_layer, print_data, show_data)
 from izer.utils import ffs, fls, overlap, plural, popcount
 
 from . import backend
@@ -344,6 +344,13 @@ class Backend(backend.Backend):
             eprint('Streaming in the first layer requires use of a FIFO.')
         if any(streaming) and start_layer != 0:
             eprint('`--start_layer` must be 0 when using streaming.')
+
+        print("kernel")
+        i = 0
+        for ll in kernel:
+            print(i)
+            print(ll.shape)
+            i = i + 1
 
         for ll in range(min(tc.dev.MAX_STREAM_LAYERS + 1, layers)):
             if next_sequence[ll] != -1 and next_sequence[ll] != ll + 1 and streaming[ll]:
@@ -851,17 +858,17 @@ class Backend(backend.Backend):
             else:
                 nprint('--overwrite specified, writing to', target_dir, 'even though it exists.')
 
-        # Redirect stdout?
-        if log:
-            state.output_is_console = False
-            sys.stdout = open(
-                os.path.join(base_directory, test_name, log_filename),
-                mode='w',
-                encoding='utf-8',
-            )
-            print(f'{" ".join(str(x) for x in sys.argv)}')
-            print(f'{tc.dev.partnum}\n')
-            print(f'{test_name}')
+        # stdout?
+        # if log:
+        #     state.output_is_console = False
+        #     sys.stdout = open(
+        #         os.path.join(base_directory, test_name, log_filename),
+        #         mode='w',
+        #         encoding='utf-8',
+        #     )
+        #     print(f'{" ".join(str(x) for x in sys.argv)}')
+        #     print(f'{tc.dev.partnum}\n')
+        #     print(f'{test_name}')
 
         if block_mode:
             filename = state.input_filename + '.mem'
@@ -3183,19 +3190,21 @@ class Backend(backend.Backend):
                         datafile=datafile,
                     )
 ###################################################################################################
-                elif operator[ll] == op.ATTENTION:
-                    out_buf, out_size = attention_layer(
+                elif operator[ll] == op.MHSA:
+                    print('here')
+                    print(ll)
+                    print(kernel_ptrs[ll])
+                    out_buf, out_size = mhsa_layer(
                         ll,
                         data.shape,
-                        kernel[kernel_ptrs[ll]],
+                        [kernel[kernel_ptrs[ll]], kernel[kernel_ptrs[ll]+1], kernel[kernel_ptrs[ll]+2], kernel[kernel_ptrs[ll]+3]],
                         bias[bias_ptrs[ll]],
                         data,
                         output_width=output_width[ll],
-                        num_heads=num_heads[ll],
-                        seq_length=seq_length[ll]
+                        # num_heads=num_heads[ll],
                     )
                 elif operator[ll] == op.LAYER_NORM:
-                    out_buf, out_size = layer_norm_layer(
+                    out_buf, out_size = layernorm_layer(
                         ll,
                         data.shape,
                         kernel[kernel_ptrs[ll]],
@@ -3203,44 +3212,6 @@ class Backend(backend.Backend):
                         data,
                         output_width=output_width[ll],
                     )
-                elif operator[ll] == op.FEED_FORWARD:
-                    out_buf, out_size = feed_forward_layer(
-                        ll,
-                        data.shape,
-                        kernel[kernel_ptrs[ll]],
-                        bias[bias_ptrs[ll]],
-                        data,
-                        output_width=output_width[ll],
-                    )
-                elif operator[ll] == op.RESIDUAL:
-                    out_buf, out_size = residual_layer(
-                        ll,
-                        data.shape,
-                        data,
-                        output_width=output_width[ll],
-                    )
-                elif operator[ll] == op.PATCH_EMBED:
-                    # grab the three consecutive weight / bias blobs
-                    k0 = kernel[kernel_ptrs[ll]    ]
-                    k1 = kernel[kernel_ptrs[ll] + 1]
-                    k2 = kernel[kernel_ptrs[ll] + 2]
-                    b0 = bias  [bias_ptrs[ll]      ]
-                    b1 = bias  [bias_ptrs[ll] + 1  ]
-                    b2 = bias  [bias_ptrs[ll] + 2  ]
-
-                    out_buf, out_size = patch_embed_layer(
-                        ll,
-                        data,
-                        [k0, k1, k2],
-                        [b0, b1, b2],
-                        patch_size=stride[ll][0],      # stride entry in YAML is patch size
-                        cls_token=state.cls_token,     # load once at program start
-                        pos_embed=state.pos_embed,
-                    )
-
-                    # advance the weight pointers by 2 extra blobs we ate
-                    kernel_ptrs[ll] += 2
-                    bias_ptrs[ll]   += 2
 ###################################################################################################
                 else:
                     eprint(f'Unknown operator `{op.string(operator[ll])}`.')
