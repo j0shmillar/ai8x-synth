@@ -13,12 +13,10 @@ CONV2D = 2
 CONVTRANSPOSE2D = 3
 LINEAR = 4
 MHSA = 5
+
 ATTENTION = 6
 LAYER_NORM = 7
-FEED_FORWARD = 8
-RESIDUAL = 9
-PATCH_EMBED = 10
-GEMM = 11
+PATCH_EMBED = 8
 
 ACT_RELU = 1
 ACT_ABS = 2
@@ -43,6 +41,7 @@ OP_NAMES = {
     LINEAR: 'linear',
     MHSA: 'mhsa',
     LAYER_NORM: 'layer_norm',
+    PATCH_EMBED: 'patch_embed',
 }
 
 ELT_NAMES = {

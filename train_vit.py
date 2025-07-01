@@ -25,7 +25,7 @@ batch_size = 64
 learning_rate = 1e-3
 weight_decay = 1e-4
 num_epochs = 1
-checkpoint_file = 'trained/ai85-vit.pth.tar'
+checkpoint_file = 'trained/ai85-vit-patch_size_1.pth.tar'
 num_workers = 2
 pin_memory = True
 
@@ -146,11 +146,11 @@ def main():
 
         # if val_acc > best_acc:
         #     best_acc = val_acc
-        torch.save({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'arch': 'ai85_vit',
-        }, checkpoint_file)
+        # torch.save({
+        #     'epoch': epoch + 1,
+        #     'state_dict': model.state_dict(),
+        #     'arch': 'ai85_vit',
+        # }, checkpoint_file)
 
         print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')

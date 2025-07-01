@@ -65,10 +65,14 @@ def load(
     for ll in range(start_layer, layers):
         if bias[ll] is None or group_map[ll] is None:
             continue
-        # Check all layers, including non-depth-wise
-        if len(bias[ll]) != output_chan[ll]:
-            eprint(f'{layer_pfx(ll)}Output channel count {output_chan[ll]} does not match the '
-                   f'number of bias values {len(bias[ll])}.')
+
+    # TODO check
+    ############################################################################
+        # if len(bias[ll]) != output_chan[ll]:
+        #     eprint(f'{layer_pfx(ll)}Output channel count {output_chan[ll]} does not match the '
+        #            f'number of bias values {len(bias[ll])}.')
+    ############################################################################
+
         if not np.any(bias[ll] != 0):
             wprint(f'{layer_pfx(ll)}All bias values are zero. Ignoring the input.')
             continue

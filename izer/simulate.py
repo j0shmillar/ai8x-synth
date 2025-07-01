@@ -35,7 +35,7 @@ def print_data(
     if verbose_data:
         print(':')
         with np.printoptions(formatter={'int': int8_format.format}):
-            if input_size[1] == input_size[2] == 1:
+            if len(input_size) == 3 and input_size[1] == input_size[2] == 1:
                 for i in range(0, input_size[0], expand_thresh):
                     last = min(i + expand_thresh, input_size[0])
                     if last - 1 > i:
@@ -115,6 +115,8 @@ def conv2d_layer(
     Perform 2D convolution for one layer.
     """
     verbose_data = state.verbose_all or state.output_layer[layer]
+
+    print(f"conv data shape: {data.shape}")
 
     if state.verbose:
         print(f"{kernel_size[0]}x{kernel_size[1]} KERNEL(S)", end='')
@@ -849,43 +851,148 @@ def mhsa_layer(
         data,
         output_width=8,
         num_heads=4,
-        seq_length=None,
+        cls_tokens=None,
+        d_model=64,
+        seq_length=82,
 ):
     """
-    Hardware-accelerated MHSA using linear layers (matrix multiplication primitives).
+    Hardware-accelerated MHSA using per-token linear projections.
     """
-    if len(input_size) < 2:
-        raise ValueError(f"MHSA expects at least 2-D input, got shape {input_size}")
-    seq_len, d_model = input_size[-2], input_size[-1]
-    
-    w_q, w_k, w_v, w_o = kernels
-    # print(w_q.shape)
-    # print(w_k.shape)
-    # print(w_v.shape)
-    # print(w_o.shape)
-    b_q, b_k, b_v, b_o = biases if biases is not None else [None, None, None, None]
-    
-    data_flat = data.reshape(-1)
-    
-    q_flat = linear(layer, data_flat, w_q, b_q, seq_len * d_model, seq_len * d_model)
-    q = q_flat.reshape(seq_len, d_model)
-    
-    k_flat = linear(layer, data_flat, w_k, b_k, seq_len * d_model, seq_len * d_model)
-    k = k_flat.reshape(seq_len, d_model)
-    
-    v_flat = linear(layer, data_flat, w_v, b_v, seq_len * d_model, seq_len * d_model)
-    v = v_flat.reshape(seq_len, d_model)
-    
-    attn = (q + k + v) / 3
-    
-    attn_flat = attn.reshape(-1)
-    out_flat = linear(layer, attn_flat, w_o, b_o, seq_len * d_model, seq_len * d_model)
-    out = out_flat.reshape(seq_len, d_model)
-    
+
+    print(data.shape)
+
+    seq_len = seq_length
+
+    kernels = kernels.squeeze(0)
+
+    # Extract weights correctly
+    w_q = kernels[:64]
+    w_k = kernels[64:128]
+    w_v = kernels[128:192]
+    w_o = kernels[192:256]
+
+    if biases is not None:
+        b_q = biases[:64]
+        b_k = biases[64:128]
+        b_v = biases[128:192]
+        b_o = biases[192:256]
+    else:
+        b_q = b_k = b_v = b_o = None
+
+    # Prepend CLS token
+    data_reshaped = data.reshape(-1, d_model)   # (81, 64)
+    cls_tokens_squeezed = np.squeeze(cls_tokens, axis=0)  # (1, 64)
+    data_with_cls = np.concatenate((cls_tokens_squeezed, data_reshaped), axis=0)  # (82, 64)
+
+
+    # Prepare outputs
+    q_list, k_list, v_list = [], [], []
+
+    for i in range(seq_len):
+        token_flat = data_with_cls[i]  # shape: (64,)
+        # Project using hardware-supported linear
+        q_token = linear(layer, token_flat, w_q, b_q, d_model, d_model)
+        k_token = linear(layer, token_flat, w_k, b_k, d_model, d_model)
+        v_token = linear(layer, token_flat, w_v, b_v, d_model, d_model)
+        q_list.append(q_token)
+        k_list.append(k_token)
+        v_list.append(v_token)
+
+    q = np.stack(q_list, axis=0)  # (82, 64)
+    k = np.stack(k_list, axis=0)
+    v = np.stack(v_list, axis=0)
+
+    attn = (q + k + v) // 3  # integer-friendly average
+
+    out_list = []
+    for i in range(seq_len):
+        attn_token = attn[i]  # shape: (64,)
+        out_token = linear(layer, attn_token, w_o, b_o, d_model, d_model)
+        out_list.append(out_token)
+
+    out = np.stack(out_list, axis=0)  # (82, 64)
+
     if output_width == 8:
         out = np.clip(out, -128, 127)
     
-    return out, out.shape
+    out_transposed = out.T
+    print(out_transposed.shape)
+    return out_transposed, out_transposed.shape
+
+def patch_embed_layer(
+        layer: int,
+        data: np.ndarray,
+        input_size,
+        kernels,
+        biases,
+        patch_size = 3,
+        cls_token = None,
+        pos_embed = None
+):
+    # ---------------- first conv 1→d_model -----------------
+    x = conv2d(
+        data,
+        kernels[0],
+        biases[0],
+        input_size=input_size,
+        output_size=(kernels[0].shape[0], input_size[1], input_size[2]),
+        kernel_size=(3, 3),
+        stride=(1, 1),
+        pad=(1, 1),
+        dilation=(1, 1),
+        fractional_stride=(1, 1),
+        output_pad=(0, 0),
+    )
+    # x = np.maximum(0, x)  # ReLU
+
+    # ---------------- second conv d_model→d_model ----------
+    x = conv2d(
+        x,
+        kernels[1],
+        biases[1],
+        input_size=x.shape,
+        output_size=x.shape,           # stride 1, same spatial size
+        kernel_size=(3, 3),
+        stride=(1, 1),
+        pad=(1, 1),
+        dilation=(1, 1),
+        fractional_stride=(1, 1),
+        output_pad=(0, 0),
+    )
+    # x = np.maximum(0, x)
+
+    # ---------------- third conv  stride = patch_size ------
+    out_h = (x.shape[1] + 2*1 - 3) // patch_size + 1   # pad=1, k=3
+    out_w = (x.shape[2] + 2*1 - 3) // patch_size + 1
+    x = conv2d(
+        x,
+        kernels[2],
+        biases[2],
+        input_size=x.shape,
+        output_size=(kernels[2].shape[0], out_h, out_w),
+        kernel_size=(3, 3),
+        stride=(patch_size, patch_size),
+        pad=(1, 1),
+        dilation=(1, 1),
+        fractional_stride=(1, 1),
+        output_pad=(0, 0),
+    )
+
+    # --------------- flatten to (tokens, d_model) ----------
+    d_model = x.shape[0]
+    tokens  = x.reshape(d_model, -1).T            # (num_patches, d_model)
+
+    # --------------- prepend CLS token ---------------------
+    if cls_token is not None:
+        cls_tok = cls_token.reshape(1, d_model)
+        tokens  = np.vstack((cls_tok, tokens))
+
+    # --------------- add positional embedding --------------
+    if pos_embed is not None:
+        tokens += pos_embed[:tokens.shape[0], :]
+
+    # return in (sequence, dim) order expected by later layers
+    return tokens, tokens.shape
 
 ########################################################################################################################
 
@@ -916,13 +1023,23 @@ def show_data(
                             f"{operands} OPERANDS)...\n"
             print(op_string)
 
+# TODO check     
+###################################################################################################
             if operands == 1:
-                print_data(verbose_input,
-                           f"{data.shape[1]}x{data.shape[2]}x{data.shape[3]} INPUT DATA",
-                           data[0],
-                           [data.shape[1], data.shape[2], data.shape[3]],
-                           expand,
-                           expand_thresh)
+                if data.ndim == 3:
+                    print_data(verbose_input,
+                            f"{data.shape[1]}x{data.shape[2]} INPUT DATA",
+                            data[0],
+                            [data.shape[1], data.shape[2]],
+                            expand,
+                            expand_thresh)
+                elif data.ndim == 4:
+                    print_data(verbose_input,
+                            f"{data.shape[1]}x{data.shape[2]}x{data.shape[3]} INPUT DATA",
+                            data[0],
+                            [data.shape[1], data.shape[2], data.shape[3]],
+                            expand,
+                            expand_thresh)
             else:
                 for i in range(operands):
                     print_data(verbose_input,
@@ -938,3 +1055,4 @@ def show_data(
                 print(':')
                 print(np.squeeze(data))
             print('')
+###################################################################################################

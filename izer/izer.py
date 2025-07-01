@@ -97,7 +97,7 @@ def main():
         else:
             # PyTorch checkpoint file selected
             layers, weights, bias, output_shift, \
-                input_channels, output_channels, final_scale = \
+                input_channels, output_channels, final_scale, cls_tokens = \
                 checkpoint.load(
                     args.checkpoint_file,
                     cfg['arch'],
@@ -678,6 +678,8 @@ def main():
     state.unload_custom = params['unload_custom']
     state.weights = weights
     state.write_gap = write_gap
+
+    state.cls_tokens = cls_tokens
 
     # Implied states
     if state.riscv_debug:

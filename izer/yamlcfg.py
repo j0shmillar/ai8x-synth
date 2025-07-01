@@ -374,6 +374,10 @@ def parse(
                 operator[sequence] = op.LAYER_NORM
                 kernel_size[sequence] = [1, 1]
                 padding[sequence] = [0, 0]
+            elif conv == 'patch_embed':
+                operator[sequence] = op.PATCH_EMBED
+                kernel_size[sequence] = [1, 1]
+                padding[sequence] = [0, 0]
 
 ######################################################################################################
             else:

@@ -13,6 +13,7 @@ class PatchEmbedding(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, d_model, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(d_model, d_model, kernel_size=3, stride=1, padding=1)
         self.conv3 = nn.Conv2d(d_model, d_model, kernel_size=3, stride=patch_size, padding=1)
+        self.pool = nn.AvgPool2d(kernel_size=3, stride=3)
         self.relu = nn.ReLU()
 
         H, W = img_size
@@ -31,6 +32,8 @@ class PatchEmbedding(nn.Module):
         x = self.relu(x)
         x = self.conv3(x)
         x = self.relu(x)
+        x = self.pool(x)
+
         x = x.flatten(2).transpose(1, 2)  # (B, n_patches, d_model)
         n_patches = x.shape[1]
 
@@ -75,6 +78,7 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
+        print(x.shape)
         x = x + self.ff(self.norm2(x))
         return x
 
@@ -82,6 +86,8 @@ class ViT(nn.Module):
     def __init__(self, img_size=(28, 28), patch_size=7, in_channels=1, num_classes=10,
                  d_model=64, num_heads=4, num_layers=4, d_ff=128, dropout=0.1):
         super().__init__()
+
+        patch_size = 1 # TODO fix
         
         self.patch_embed = PatchEmbedding(
             img_size=img_size,
@@ -108,6 +114,7 @@ class ViT(nn.Module):
 
     def forward(self, x):
         x = self.patch_embed(x)
+        # print(x.shape)
         for block in self.blocks:
             x = block(x)
         x = self.norm(x)

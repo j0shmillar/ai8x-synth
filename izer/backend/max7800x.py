@@ -21,7 +21,7 @@ from izer import tornadocnn as tc
 from izer.eprint import eprint, nprint, wprint
 from izer.names import layer_pfx, layer_str
 from izer.simulate import (conv1d_layer, conv2d_layer, convtranspose2d_layer, eltwise_layer,
-                           passthrough_layer, pooling_layer, layernorm_layer, mhsa_layer, print_data, show_data)
+                           passthrough_layer, pooling_layer, mhsa_layer, layernorm_layer, patch_embed_layer, print_data, show_data)
 from izer.utils import ffs, fls, overlap, plural, popcount
 
 from . import backend
@@ -158,6 +158,8 @@ class Backend(backend.Backend):
         write_zero_regs = state.write_zero_regs
         zero_sram = state.zero_sram
         zero_unused = state.zero_unused
+
+        cls_tokens = state.cls_tokens 
 
         if not os.path.isdir('assets'):
             eprint('The assets folder is missing from the current directory.')
@@ -344,13 +346,6 @@ class Backend(backend.Backend):
             eprint('Streaming in the first layer requires use of a FIFO.')
         if any(streaming) and start_layer != 0:
             eprint('`--start_layer` must be 0 when using streaming.')
-
-        print("kernel")
-        i = 0
-        for ll in kernel:
-            print(i)
-            print(ll.shape)
-            i = i + 1
 
         for ll in range(min(tc.dev.MAX_STREAM_LAYERS + 1, layers)):
             if next_sequence[ll] != -1 and next_sequence[ll] != ll + 1 and streaming[ll]:
@@ -3191,16 +3186,17 @@ class Backend(backend.Backend):
                     )
 ###################################################################################################
                 elif operator[ll] == op.MHSA:
-                    print('here')
-                    print(ll)
-                    print(kernel_ptrs[ll])
+                    print('in mhsa op (max7800x)')
                     out_buf, out_size = mhsa_layer(
                         ll,
                         data.shape,
-                        [kernel[kernel_ptrs[ll]], kernel[kernel_ptrs[ll]+1], kernel[kernel_ptrs[ll]+2], kernel[kernel_ptrs[ll]+3]],
+                        kernel[kernel_ptrs[ll]],
                         bias[bias_ptrs[ll]],
                         data,
                         output_width=output_width[ll],
+                        cls_tokens = cls_tokens[0], # TODO fix; softcode
+                        d_model = 64,  # TODO fix; softcode
+                        seq_length=82 # TODO fix; softcode
                         # num_heads=num_heads[ll],
                     )
                 elif operator[ll] == op.LAYER_NORM:
@@ -3212,6 +3208,15 @@ class Backend(backend.Backend):
                         data,
                         output_width=output_width[ll],
                     )
+                # elif operator[ll] == op.PATCH_EMBED:
+                #     out_buf, out_size = patch_embed_layer(
+                #         ll,
+                #         data.shape,
+                #         kernel[kernel_ptrs[ll]],
+                #         bias[bias_ptrs[ll]],
+                #         data,
+                #         output_width=output_width[ll],
+                #     )
 ###################################################################################################
                 else:
                     eprint(f'Unknown operator `{op.string(operator[ll])}`.')
@@ -3259,11 +3264,17 @@ class Backend(backend.Backend):
                     # Operator output
                     np.save(datafile, out_buf, allow_pickle=False, fix_imports=False)
 
+                # TODO check
+                ############################################################################
                 if buffer_shift[ll] is None:
-                    assert out_size[0] == output_chan[ll] \
-                        and out_size[1] == output_dim[ll][0] and out_size[2] == output_dim[ll][1]
-                    assert out_size[0] == output_size[ll][0] \
-                        and out_size[1] == output_size[ll][1] and out_size[2] == output_size[ll][2]
+                    if len(out_size) == 2:
+                        assert out_size[0] == output_chan[ll] \
+                            and out_size[1] == (output_dim[ll][0]*output_dim[ll][1]) + 1
+                    elif len(out_size) == 3:
+                        assert out_size[0] == output_chan[ll] \
+                            and out_size[1] == output_dim[ll][0] and out_size[2] == output_dim[ll][1]
+                        assert out_size[0] == output_size[ll][0] \
+                            and out_size[1] == output_size[ll][1] and out_size[2] == output_size[ll][2]
                 else:
                     assert out_size[1] == output_chan[ll] \
                         and out_size[0] - buffer_shift[ll] == output_dim[ll][0] \
@@ -3271,6 +3282,7 @@ class Backend(backend.Backend):
                     assert out_size[1] == output_size[ll][0] \
                         and out_size[0] - buffer_shift[ll] == output_size[ll][1] \
                         and out_size[2] == output_size[ll][2]
+                ############################################################################
 
                 # Write .mem file for output or create the C check_output() function to
                 # verify the output

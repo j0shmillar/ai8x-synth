@@ -35,6 +35,8 @@ layers:
     processors: 0xffffffffffffffff  
 
   - name: patch_embed.conv.2
+    avg_pool: 3
+    pool_stride: 3
     operation: conv2d
     kernel_size: 3x3
     pad: 1
@@ -55,7 +57,6 @@ layers:
 
   - name: blocks.0.attn
     operation: mhsa
-    num_heads: 4
     d_model: 64
     seq_length: 82  # 1 CLS + 9x9 patches
     out_offset: 0x2000

@@ -85,7 +85,20 @@ def load(
     error_exit = False
     seq = 0
     
+    attn_cnt = 0
+    cls_tokens = {}
     for k in checkpoint_state.keys():
+        
+        print(f"Loading {k}...")
+
+        ############################################################################
+
+        # TODO fix
+        if 'cls_token' in k:
+            cls_tokens[seq] = checkpoint_state[k].numpy().astype(np.int64)
+
+        ############################################################################
+
         # Skip over non-weight and duplicated weight layers
         while seq < len(operator) and (operator[seq] == op.NONE or bypass[seq] or weight_source[seq] is not None):
             seq += 1
@@ -96,19 +109,42 @@ def load(
             layer, this_op, parameter = param_levels[0], None, param_levels[1]
         else:
             continue
-
+        
+        ############################################################################
+        # TODO; how to support cls_token and pos_embed?
+        attn = 0
         if 'weight' in parameter: # TODO - check (old: if parameter in ['weight'])
+            if 'attn' in k:
+                print('attn_layer')
+                attn = 1
+                attn_cnt = attn_cnt + 1           
+                       
             if layers >= num_conv_layers or seq >= num_conv_layers:
                 continue
             if skip_layers > 0:
                 skip_layers -= 1
                 continue
 
-            w = checkpoint_state[k].numpy().astype(np.int64)
+            if attn and attn_cnt == 2:
+                w = np.concatenate((w, checkpoint_state[k].numpy().astype(np.int64)), axis=0)
+                attn_cnt = 0
+            else:
+                w = checkpoint_state[k].numpy().astype(np.int64)
 
-            print(k)
-            print(w.shape)
+            # TODO fix - pull out into function
+            if attn and attn_cnt == 1:
+                bias_name = '.'.join([layer, this_op, 'in_proj_bias']) # TODO fix; softcode
+                wb_name = '.'.join([layer, 'weight_bits'])
+                wb = checkpoint_state[wb_name].numpy().astype(np.int64) if wb_name in checkpoint_state else 8 
+                if bias_name in checkpoint_state and seq not in no_bias:
+                    if wb == 0:
+                        wb = 8
+                    b = np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()).astype(np.int64)                
+                continue
+
             print("########################")
+
+        ############################################################################
              
             w_min, w_max, w_abs = w.min(), w.max(), np.abs(w)
 
@@ -162,7 +198,17 @@ def load(
             mult = conv_groups[seq] if operator[seq] != op.CONVTRANSPOSE2D else 1
             input_channels.append(w.shape[1] * mult)  # Input channels
             mult = conv_groups[seq] if operator[seq] == op.CONVTRANSPOSE2D else 1
-            output_channels.append(w.shape[0] * mult)  # Output channels
+
+            ############################################################################
+
+            if attn:
+                output_channels.append(64) # TODO fix; softcode
+            else:
+                output_channels.append(w.shape[0] * mult) 
+
+            # output_channels.append(w.shape[0] * mult) 
+
+            ############################################################################
 
             if w.ndim == 2:  # MLP
                 if kernel_size[seq][0] != 1 or kernel_size[seq][1] != 1:
@@ -204,14 +250,19 @@ def load(
 
             if bias_name in checkpoint_state and seq not in no_bias:
 
+                print(bias_name)
+
                 if wb == 0:  # In case the weights are all zero
                     wb = 8
 
-                # Use floating point division and rounding to integer to deal with checkpoint
-                # files that are not properly quantized. The bias values in quantized checkpoints
-                # are multiples of 128, so there will be no rounding for those checkpoints.
-                w = np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()). \
-                    astype(np.int64)
+                ############################################################################
+
+                if attn:
+                    w = np.concatenate((b, np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()).astype(np.int64)), axis=0)
+                else:
+                    w = np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()).astype(np.int64)
+
+                ############################################################################
 
                 if np.all(w == 0):
                     wprint(f'All bias values for `{bias_name}` are zero.')
@@ -296,5 +347,4 @@ def load(
     if error_exit:
         sys.exit(1)
 
-    return layers, weights, bias, output_shift, \
-        input_channels, output_channels, final_scale
+    return layers, weights, bias, output_shift, input_channels, output_channels, final_scale, cls_tokens
