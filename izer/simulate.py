@@ -462,84 +462,151 @@ def conv1d_layer(
     return out_buf, out_size
 
 
+# def linear_layer(
+#         layer,
+#         activation,
+#         weight,
+#         bias,
+#         data,
+#         bits=16,
+# ):
+#     """
+#     Perform one software linear layer.
+#     """
+#     verbose_data = state.verbose_all or state.output_layer[layer]
+#     verbose_input = state.verbose_all or layer == state.start_layer \
+#         or state.in_sequences[layer] is not None and -1 in state.in_sequences[layer]
+
+#     in_features = data.shape[0]
+#     out_features = weight.shape[0]
+
+#     if state.verbose_all or verbose_input:
+#         print("CLASSIFICATION LAYER (LINEAR)...\n")
+#         print(f"INPUT DATA (size {in_features})", end='')
+#         if verbose_input:
+#             print(':')
+#             print(data)
+#         print('')
+
+#     if state.verbose_all:
+#         print(f"WEIGHTS (size {in_features * out_features})", end='')
+#         print(':')
+#         print(weight)
+#         print_data1d(state.verbose_all, "BIAS", bias)
+
+#     out_buf = linear(
+#         layer=layer,
+#         data=data,
+#         weight=weight,
+#         bias=bias,
+#         in_features=in_features,
+#         out_features=out_features,
+#     )
+#     out_buf = np.floor(0.5 + out_buf / 128).astype(np.int64). \
+#         clip(-(2**(bits-1)), 2**(bits-1)-1)
+
+#     if state.verbose and verbose_data:
+#         print(f"OUTPUT (size {out_features}):")
+#         print(out_buf)
+#         print('')
+
+#     stats.account(
+#         layer,
+#         "sw_macc",
+#         in_features * out_features,
+#     )
+
+#     if activation is not None:
+#         if activation == op.ACT_RELU:
+#             np.clip(out_buf, 0, 2**(bits-1)-1, out_buf)
+#         elif activation == op.ACT_ABS:
+#             out_buf = np.abs(out_buf).clip(0, 2**(bits-1)-1)
+
+#         if state.verbose and verbose_data:
+#             print(f"ACTIVATED OUTPUT (size {out_features})"
+#                   f" ({op.act_string(activation).upper()}):")
+#             print(out_buf)
+#             print('')
+
+#         stats.account(
+#             layer,
+#             "sw_comp",
+#             out_features,
+#         )
+
+#     if state.verbose and not verbose_data:
+#         print(f"OUTPUT (size {out_features})"
+#               f" ({op.act_string(activation).upper()})\n")
+
+#     return out_buf, out_features
+
 def linear_layer(
         layer,
         activation,
         weight,
         bias,
         data,
-        bits=16,
+        bits=8,
 ):
     """
-    Perform one software linear layer.
+    Fully hardware-accelerated linear layer using conv1d ops on MAX78000.
+    Replaces GEMV with conv1d while preserving activation handling and stats accounting.
     """
+
     verbose_data = state.verbose_all or state.output_layer[layer]
-    verbose_input = state.verbose_all or layer == state.start_layer \
-        or state.in_sequences[layer] is not None and -1 in state.in_sequences[layer]
 
     in_features = data.shape[0]
     out_features = weight.shape[0]
 
-    if state.verbose_all or verbose_input:
-        print("CLASSIFICATION LAYER (LINEAR)...\n")
-        print(f"INPUT DATA (size {in_features})", end='')
-        if verbose_input:
-            print(':')
-            print(data)
-        print('')
+    # Reshape input for hardware conv1d:
+    #   data: (in_channels, width, 1)
+    data_hw = data.reshape(in_features, 1, 1)
 
-    if state.verbose_all:
-        print(f"WEIGHTS (size {in_features * out_features})", end='')
-        print(':')
-        print(weight)
-        print_data1d(state.verbose_all, "BIAS", bias)
+    # Reshape weights:
+    #   weight: (out_channels, in_channels, kernel_size=1)
+    w_hw = weight.reshape(out_features, in_features, 1)
 
-    out_buf = linear(
+    # Bias:
+    if bias is not None:
+        bias_hw = bias.astype(np.int64)
+    else:
+        bias_hw = np.zeros(out_features, dtype=np.int64)
+
+    # Use conv1d_layer to compute:
+    out_buf, out_shape_hw = conv1d_layer(
         layer=layer,
-        data=data,
-        weight=weight,
-        bias=bias,
-        in_features=in_features,
-        out_features=out_features,
+        input_size=data_hw.shape,
+        kernel_size=1,
+        output_shift=0,              # Use zero shift, as no scaling here
+        output_channels=out_features,
+        padding=0,
+        dilation=1,
+        stride=1,
+        activation=activation,
+        kernel=w_hw,
+        bias=bias_hw,
+        data=data_hw,
+        bits=bits,
+        output_width=bits,
+        groups=1,
+        bypass=False,
+        datafile=None,
     )
-    out_buf = np.floor(0.5 + out_buf / 128).astype(np.int64). \
-        clip(-(2**(bits-1)), 2**(bits-1)-1)
 
-    if state.verbose and verbose_data:
-        print(f"OUTPUT (size {out_features}):")
-        print(out_buf)
-        print('')
+    output = out_buf[:, 0, 0]
 
     stats.account(
         layer,
-        "sw_macc",
-        in_features * out_features,
+        "macc",
+        in_features * out_features
     )
 
-    if activation is not None:
-        if activation == op.ACT_RELU:
-            np.clip(out_buf, 0, 2**(bits-1)-1, out_buf)
-        elif activation == op.ACT_ABS:
-            out_buf = np.abs(out_buf).clip(0, 2**(bits-1)-1)
+    if state.verbose and verbose_data:
+        print(f"LINEAR OUTPUT (size {out_features}):")
+        print(output)
+        print('')
 
-        if state.verbose and verbose_data:
-            print(f"ACTIVATED OUTPUT (size {out_features})"
-                  f" ({op.act_string(activation).upper()}):")
-            print(out_buf)
-            print('')
-
-        stats.account(
-            layer,
-            "sw_comp",
-            out_features,
-        )
-
-    if state.verbose and not verbose_data:
-        print(f"OUTPUT (size {out_features})"
-              f" ({op.act_string(activation).upper()})\n")
-
-    return out_buf, out_features
-
+    return output, out_features
 
 def passthrough_layer(
         layer,  # pylint: disable=unused-argument
@@ -629,6 +696,8 @@ def eltwise_layer(
 
     return out_buf, input_size
 
+# TODO - modified, so check
+########################################################################################################################
 
 def pooling_layer(
         layer,
@@ -649,16 +718,20 @@ def pooling_layer(
     Perform pooling for one layer.
     """
     # Always apply stride
-    if operation != op.CONV1D:
+    if operation == op.CONV1D:
+        pooled_size = [input_size[0],
+                       (input_size[1] + pool_stride[0] - pool[0]
+                        - dilation[0] + 1) // pool_stride[0]]
+    elif data.ndim == 3:
+        pooled_size = [input_size[0],
+                       (input_size[1] + pool_stride[0] - pool[0]
+                        - dilation[0] + 1) // pool_stride[0]]
+    elif data.ndim == 4:
         pooled_size = [input_size[0],
                        (input_size[1] + pool_stride[0]
                         - pool[0] - dilation[0] + 1) // pool_stride[0],
                        (input_size[2] + pool_stride[1]
                         - pool[1] - dilation[1] + 1) // pool_stride[1]]
-    else:
-        pooled_size = [input_size[0],
-                       (input_size[1] + pool_stride[0] - pool[0]
-                        - dilation[0] + 1) // pool_stride[0]]
 
     # Actual pooling operation?
     if pool[0] > 1 or pool[1] > 1:
@@ -754,18 +827,7 @@ def pooling_layer(
 
     else:
         # Use pool_stride only
-        if operation != op.CONV1D:
-            pooled = data[:, :, ::pool_stride[0], ::pool_stride[1]]
-            if pool_stride[0] > 1 or pool_stride[1] > 1:
-                if state.verbose:
-                    print(f"{'AVERAGE' if pool_average else 'MAX'} "
-                          f"POOL {pool[0]}x{pool[1]} WITH STRIDE {pool_stride[0]}/{pool_stride[1]}"
-                          f" {input_size} -> {pooled_size}", end='')
-                    if state.verbose_all:
-                        print(':')
-                        print(pooled)
-                    print('')
-        else:
+        if operation == op.CONV1D:
             pooled = data[:, :, ::pool_stride[0]]
             if pool_stride[0] > 1:
                 if state.verbose:
@@ -776,8 +838,32 @@ def pooling_layer(
                         print(':')
                         print(pooled)
                     print('')
+        elif data.ndim == 3: 
+            pooled = data[:, :, ::pool_stride[0]]
+            if pool_stride[0] > 1:
+                if state.verbose:
+                    print(f"{'AVERAGE' if pool_average else 'MAX'} "
+                          f"POOL {pool[0]} WITH STRIDE {pool_stride[0]} "
+                          f"{input_size} -> {pooled_size}", end='')
+                    if state.verbose_all:
+                        print(':')
+                        print(pooled)
+                    print('')
+        elif data.ndim == 4:
+            pooled = data[:, :, ::pool_stride[0], ::pool_stride[1]]
+            if pool_stride[0] > 1 or pool_stride[1] > 1:
+                if state.verbose:
+                    print(f"{'AVERAGE' if pool_average else 'MAX'} "
+                          f"POOL {pool[0]}x{pool[1]} WITH STRIDE {pool_stride[0]}/{pool_stride[1]}"
+                          f" {input_size} -> {pooled_size}", end='')
+                    if state.verbose_all:
+                        print(':')
+                        print(pooled)
+                    print('')
 
     return pooled, pooled_size
+
+########################################################################################################################
 
 ########################################################################################################################
 
@@ -841,7 +927,89 @@ def layernorm_layer(           # pylint: disable=too-many-arguments
         print(out_buf)
         print('')
 
+    if out_shape[0] != 64: # TODO fix; softcode
+        out_buf = out_buf.T
+        out_shape = out_buf.shape
+
     return out_buf, out_shape
+
+# TODO; missing Q,K,V LayerNorm
+# def mhsa_layer(
+#         layer,
+#         input_size,      
+#         kernels,         
+#         biases, 
+#         data,
+#         output_width=8,
+#         num_heads=4,
+#         cls_tokens=None,
+#         d_model=64,
+#         seq_length=82,
+# ):
+#     """
+#     Hardware-accelerated MHSA using per-token linear projections.
+#     """
+
+#     print(data.shape)
+
+#     seq_len = seq_length
+
+#     kernels = kernels.squeeze(0)
+
+#     # Extract weights correctly
+#     w_q = kernels[:64]
+#     w_k = kernels[64:128]
+#     w_v = kernels[128:192]
+#     w_o = kernels[192:256]
+
+#     if biases is not None:
+#         b_q = biases[:64]
+#         b_k = biases[64:128]
+#         b_v = biases[128:192]
+#         b_o = biases[192:256]
+#     else:
+#         b_q = b_k = b_v = b_o = None
+
+#     # Prepend CLS token
+#     data_reshaped = data.reshape(-1, d_model)   # (81, 64)
+#     cls_tokens_squeezed = np.squeeze(cls_tokens, axis=0)  # (1, 64)
+#     data_with_cls = np.concatenate((cls_tokens_squeezed, data_reshaped), axis=0)  # (82, 64)
+
+#     # x = torch.cat([cls_token, x], dim=1)  # (B, 1 + n_patches, d_model) ?
+
+
+#     # Prepare outputs
+#     q_list, k_list, v_list = [], [], []
+
+#     for i in range(seq_len):
+#         token_flat = data_with_cls[i]  # shape: (64,)
+#         # Project using hardware-supported linear
+#         q_token = linear(layer, token_flat, w_q, b_q, d_model, d_model)
+#         k_token = linear(layer, token_flat, w_k, b_k, d_model, d_model)
+#         v_token = linear(layer, token_flat, w_v, b_v, d_model, d_model)
+#         q_list.append(q_token)
+#         k_list.append(k_token)
+#         v_list.append(v_token)
+
+#     q = np.stack(q_list, axis=0)  # (82, 64)
+#     k = np.stack(k_list, axis=0)
+#     v = np.stack(v_list, axis=0)
+
+#     attn = (q + k + v) // 3  # integer-friendly average
+
+#     out_list = []
+#     for i in range(seq_len):
+#         attn_token = attn[i]  # shape: (64,)
+#         out_token = linear(layer, attn_token, w_o, b_o, d_model, d_model)
+#         out_list.append(out_token)
+
+#     out = np.stack(out_list, axis=0)  # (82, 64)
+
+#     if output_width == 8:
+#         out = np.clip(out, -128, 127)
+    
+#     out_transposed = out.T
+#     return out_transposed, out_transposed.shape
 
 def mhsa_layer(
         layer,
@@ -856,20 +1024,36 @@ def mhsa_layer(
         seq_length=82,
 ):
     """
-    Hardware-accelerated MHSA using per-token linear projections.
+    Fully hardware-accelerated MHSA using Conv1D to replace linear projections,
+    suitable for MAX78000 hardware.
     """
 
-    print(data.shape)
+    # =============================
+    # Ensure data shape: (seq_len, d_model)
+    if data.ndim == 3 and data.shape[0] == d_model:
+        # (d_model, H, W) -> flatten spatial dims
+        seq_len = data.shape[1] * data.shape[2]
+        data = data.reshape(d_model, seq_len).T  # (seq_len, d_model)
+    elif data.ndim == 2 and data.shape[0] == d_model:
+        # (d_model, seq_len) -> transpose
+        data = data.T
+    elif data.ndim == 2 and data.shape[1] == d_model:
+        # already (seq_len, d_model)
+        pass
+    else:
+        raise ValueError(f"mhsa_layer: Unexpected data shape {data.shape}, expected (C,H,W), (seq_len,d_model), or (d_model,seq_len)")
+
+    verbose_data = state.verbose_all or state.output_layer[layer]
 
     seq_len = seq_length
 
-    kernels = kernels.squeeze(0)
+    # Extract and reshape kernels for hardware Conv1D
+    kernels = kernels.squeeze(0)  # shape: (256, 64)
 
-    # Extract weights correctly
-    w_q = kernels[:64]
-    w_k = kernels[64:128]
-    w_v = kernels[128:192]
-    w_o = kernels[192:256]
+    w_q = kernels[:64].reshape(d_model, d_model, 1)    # (out_channels, in_channels, 1)
+    w_k = kernels[64:128].reshape(d_model, d_model, 1)
+    w_v = kernels[128:192].reshape(d_model, d_model, 1)
+    w_o = kernels[192:256].reshape(d_model, d_model, 1)
 
     if biases is not None:
         b_q = biases[:64]
@@ -879,45 +1063,128 @@ def mhsa_layer(
     else:
         b_q = b_k = b_v = b_o = None
 
-    # Prepend CLS token
-    data_reshaped = data.reshape(-1, d_model)   # (81, 64)
-    cls_tokens_squeezed = np.squeeze(cls_tokens, axis=0)  # (1, 64)
-    data_with_cls = np.concatenate((cls_tokens_squeezed, data_reshaped), axis=0)  # (82, 64)
+    # Determine if cls_token needs to be prepended
+    if cls_tokens is not None:
+        expected_seq_len_without_cls = seq_len - 1
+    else:
+        expected_seq_len_without_cls = seq_len
 
+    if data.shape[0] == expected_seq_len_without_cls:
+        # Need to prepend cls_token
+        data_reshaped = data.reshape(-1, d_model)             # (seq_len - 1, d_model)
+        cls_token_squeezed = np.squeeze(cls_tokens, axis=0)   # (1, d_model)
+        data_with_cls = np.concatenate((cls_token_squeezed, data_reshaped), axis=0)  # (seq_len, d_model)
+    elif data.shape[0] == seq_len:
+        # cls_token already present, do not add again
+        data_with_cls = data
+    else:
+        raise ValueError(f"mhsa_layer: Unexpected data shape {data.shape}, expected {expected_seq_len_without_cls} or {seq_len} tokens")
 
-    # Prepare outputs
-    q_list, k_list, v_list = [], [], []
+    # Reshape for conv1d_layer: (d_model, seq_len, 1)
+    data_hw = data_with_cls.T[:, :, np.newaxis]
 
-    for i in range(seq_len):
-        token_flat = data_with_cls[i]  # shape: (64,)
-        # Project using hardware-supported linear
-        q_token = linear(layer, token_flat, w_q, b_q, d_model, d_model)
-        k_token = linear(layer, token_flat, w_k, b_k, d_model, d_model)
-        v_token = linear(layer, token_flat, w_v, b_v, d_model, d_model)
-        q_list.append(q_token)
-        k_list.append(k_token)
-        v_list.append(v_token)
+    # Perform Q, K, V projections using Conv1D
+    q, _ = conv1d_layer(
+        layer,
+        input_size=(d_model, seq_len, 1),
+        kernel_size=1,
+        output_shift=0,
+        output_channels=d_model,
+        padding=0,
+        dilation=1,
+        stride=1,
+        activation=None,
+        kernel=w_q,
+        bias=b_q,
+        data=data_hw,
+        output_width=output_width,
+    )
 
-    q = np.stack(q_list, axis=0)  # (82, 64)
-    k = np.stack(k_list, axis=0)
-    v = np.stack(v_list, axis=0)
+    k, _ = conv1d_layer(
+        layer,
+        input_size=(d_model, seq_len, 1),
+        kernel_size=1,
+        output_shift=0,
+        output_channels=d_model,
+        padding=0,
+        dilation=1,
+        stride=1,
+        activation=None,
+        kernel=w_k,
+        bias=b_k,
+        data=data_hw,
+        output_width=output_width,
+    )
 
-    attn = (q + k + v) // 3  # integer-friendly average
+    v, _ = conv1d_layer(
+        layer,
+        input_size=(d_model, seq_len, 1),
+        kernel_size=1,
+        output_shift=0,
+        output_channels=d_model,
+        padding=0,
+        dilation=1,
+        stride=1,
+        activation=None,
+        kernel=w_v,
+        bias=b_v,
+        data=data_hw,
+        output_width=output_width,
+    )
 
-    out_list = []
-    for i in range(seq_len):
-        attn_token = attn[i]  # shape: (64,)
-        out_token = linear(layer, attn_token, w_o, b_o, d_model, d_model)
-        out_list.append(out_token)
+    # Compute attn = (q + k + v) // 3 using CPU for simplicity (or add hardware eltwise if desired)
+    attn = (q + k + v) // 3
 
-    out = np.stack(out_list, axis=0)  # (82, 64)
+    # Perform output projection using Conv1D
+    out, _ = conv1d_layer(
+        layer,
+        input_size=(d_model, seq_len, 1),
+        kernel_size=1,
+        output_shift=0,
+        output_channels=d_model,
+        padding=0,
+        dilation=1,
+        stride=1,
+        activation=None,
+        kernel=w_o,
+        bias=b_o,
+        data=attn,
+        output_width=output_width,
+    )
+
+    # Squeeze last dim: shape (d_model, seq_len)
+    out_squeezed = out.squeeze(-1)
 
     if output_width == 8:
-        out = np.clip(out, -128, 127)
-    
-    out_transposed = out.T
-    print(out_transposed.shape)
-    return out_transposed, out_transposed.shape
+        out_squeezed = np.clip(out_squeezed, -128, 127)
+
+    if state.verbose and verbose_data:
+        print(f"MHSA OUTPUT {out_squeezed.shape}:")
+        print(out_squeezed)
+        print('')
+
+    # =======================
+    # ACCOUNT FOR MACCS
+    # =======================
+    # Each projection uses:
+    # (in_channels // groups) * kernel_size * out_channels * output_width
+    # Here:
+    # - in_channels = d_model
+    # - kernel_size = 1
+    # - out_channels = d_model
+    # - output_width = seq_len
+    #
+    # We perform 4 projections: Q, K, V, and out_proj
+
+    maccs_per_projection = d_model * 1 * d_model * seq_len
+    stats.account(layer, "macc", 4 * maccs_per_projection)
+
+    # if out_squeezed.ndim == 2:
+    #     out_squeezed = out_squeezed.T[:, :, np.newaxis] 
+
+    # =======================
+    # return out_squeezed, out_squeezed.shape
+    return out_squeezed, out_squeezed.shape
 
 def patch_embed_layer(
         layer: int,

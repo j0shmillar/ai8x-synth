@@ -195,6 +195,8 @@ def conv1d(
 
     Note that all PyTorch numbers are ordered (C, L)
     """
+    print(data.shape)
+    print(tuple(input_size))
     assert data.shape == tuple(input_size)
     in_channels = input_size[0]
     out_channels = output_size[0]
@@ -320,7 +322,6 @@ def linear(
         output[w] = val
 
     return output
-
 
 def pool2d(
         data,
@@ -540,24 +541,46 @@ def mhsa(
     return out, out.shape
 
 def layernorm(
-        layer,             # layer index for statistics
-        input_size,        # (seq , dim)
-        kernel, bias,
+        layer,             # layer index
+        input_size,        # (seq_len, d_model)
+        kernel,            # gamma, shape (d_model,)
+        bias,              # beta, shape (d_model,)
         data,
         output_width=8,
 ):
-    # flatten “token” dimension -> one big vector, run linear()
-    in_features  = input_size[0] * input_size[1]
-    out_features = in_features
-    out = linear(layer,
-                 data.reshape(-1),
-                 kernel.reshape(out_features, in_features),
-                 bias.reshape(out_features) if bias is not None else None,
-                 in_features, out_features)
-    out = out.reshape(input_size)
+    """
+    Replaces LayerNorm with hardware-friendly affine scaling:
+    y = x * gamma + beta
+    using a Linear implementation.
+    Keeps per-channel scaling and shifting.
+    Loses normalization, so input dynamic ranges are unadjusted - potential accuracy/stability drop.
+    """
+
+    d_model, seq_len = input_size
+
+    kernel_squeezed = np.squeeze(kernel)  # shape: (64,)
+    weight = np.diag(kernel_squeezed)  
+
+    out_list = []
+    data_reshaped = data.reshape(seq_len, d_model)
+
+    for i in range(seq_len):
+        token = data_reshaped[i]  # shape: (d_model,)
+        out_token = linear(
+            layer,
+            token,
+            weight,
+            bias,
+            in_features=d_model,
+            out_features=d_model
+        )
+        out_list.append(out_token)
+
+    out = np.stack(out_list, axis=0)  # shape: (seq_len, d_model)
 
     if output_width == 8:
         out = np.clip(out, -128, 127)
+
     return out, out.shape
 
 

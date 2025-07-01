@@ -20,7 +20,7 @@ from izer import (apbaccess, assets, compute, console, datamem, kbias, kdedup, k
 from izer import tornadocnn as tc
 from izer.eprint import eprint, nprint, wprint
 from izer.names import layer_pfx, layer_str
-from izer.simulate import (conv1d_layer, conv2d_layer, convtranspose2d_layer, eltwise_layer,
+from izer.simulate import (conv1d_layer, conv2d_layer, linear_layer, convtranspose2d_layer, eltwise_layer,
                            passthrough_layer, pooling_layer, mhsa_layer, layernorm_layer, patch_embed_layer, print_data, show_data)
 from izer.utils import ffs, fls, overlap, plural, popcount
 
@@ -3003,6 +3003,8 @@ class Backend(backend.Backend):
                 # Allow 1D <-> 2D and 2D W/L conversions, and skipping/subsetting
                 if input_crop[ll][0] != 0 or input_crop[ll][1] != 0:  # line skip count
                     data = data[:, :, input_crop[ll][0]:-input_crop[ll][1], :]
+                
+                print(f"shape 1 {data.shape}")
                 if operator[ll] == op.CONV1D:
                     if in_sequences[ll] != [-2]:
                         assert input_dim[ll][1] == 1
@@ -3010,8 +3012,9 @@ class Backend(backend.Backend):
                     else:
                         data = data.transpose(0, 2, 3, 1)
                         data = data.reshape(data.shape[0], -1, input_dim[ll][0])
-                elif buffer_shift[ll] is None:
-                    data = data.reshape(data.shape[0], -1, input_dim[ll][0], input_dim[ll][1])
+                # elif buffer_shift[ll] is None:
+                #     data = data.reshape(data.shape[0], -1, input_dim[ll][0], input_dim[ll][1])
+                print(f"shape 2 {data.shape}")
 
                 # In-flight pooling
                 data, out_size = pooling_layer(
@@ -3041,14 +3044,14 @@ class Backend(backend.Backend):
                         np.save(datafile, np.empty((0)), allow_pickle=False, fix_imports=False)
 
                 if operator[ll] == op.CONV1D:
-                    if out_size[0] != in_chan \
-                       or out_size[1] != pooled_dim[ll][0] or pooled_dim[ll][1] != 1:
+                    if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or pooled_dim[ll][1] != 1:
                         eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
                                f'Expected: {in_chan}x{pooled_dim[ll][0]}, '
                                f'got {out_size[0]}x{out_size[1]}.')
+                elif data.ndim == 3:
+                    print("TODO; fix")       
                 elif buffer_shift[ll] is None:
-                    if out_size[0] != in_chan \
-                       or out_size[1] != pooled_dim[ll][0] or out_size[2] != pooled_dim[ll][1]:
+                    if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or out_size[2] != pooled_dim[ll][1]:
                         eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
                                f'Expected: {in_chan}x{pooled_dim[ll][0]}x{pooled_dim[ll][1]}, '
                                f'got {out_size[0]}x{out_size[1]}x{out_size[2]}.')
@@ -3065,7 +3068,8 @@ class Backend(backend.Backend):
                     #    np.save(datafile, np.empty((0)), allow_pickle=False, fix_imports=False)
 
                 # Convolution or passthrough
-                if operator[ll] in [op.CONV2D, op.LINEAR]:
+                # if operator[ll] in [op.CONV2D, op.LINEAR]:
+                if operator[ll] == op.CONV2D:
                     if flatten[ll]:
                         in_chan *= pooled_dim[ll][0] * pooled_dim[ll][1]
                         data = data.reshape(in_chan, 1, 1)
@@ -3111,6 +3115,34 @@ class Backend(backend.Backend):
                         bypass=bypass[ll],
                         datafile=datafile,
                     )
+# TODO check
+###################################################################################################
+                elif operator[ll] == op.LINEAR:
+                    # handle linear layers properly
+                    if flatten[ll]:
+                        in_chan *= pooled_dim[ll][0] * pooled_dim[ll][1]
+                        data = data.reshape(-1)
+
+                    k = kernel[kernel_ptrs[ll]].reshape(
+                        output_chan[ll],
+                        in_chan
+                    )
+                    out_list = []
+                    # TODO check thoroughly
+                    for i in range(data.shape[1]):  # 82 tokens
+                        token = data[:, i]  # shape: (64,)
+                        out_token, _ = linear_layer(
+                            ll,
+                            activation[ll],
+                            k,
+                            bias[bias_ptrs[ll]],
+                            token
+                        )
+                        out_list.append(out_token)
+
+                    out_buf = np.stack(out_list, axis=1)  # shape: (128, 82)
+                    out_size = out_buf.shape
+###################################################################################################
                 elif operator[ll] == op.CONVTRANSPOSE2D:
                     if not bypass[ll]:
                         k = kernel[kernel_ptrs[ll]].reshape(

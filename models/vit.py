@@ -79,7 +79,10 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
         x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
         print(x.shape)
-        x = x + self.ff(self.norm2(x))
+        x = self.norm2(x)
+        print(x.shape)
+        x = x + self.ff(x)
+        print(x.shape)
         return x
 
 class ViT(nn.Module):

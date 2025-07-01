@@ -674,8 +674,23 @@ def verify(
     if unload_layer and not embedded:
         body.append(f'  // Layer {layer_str(ll)}\n')
 
-    for doffs in range(input_shape[1] * input_shape[2]):
-        row, col = divmod(doffs, input_shape[2])
+    # TODO check
+    # for doffs in range(input_shape[1] * input_shape[2]):
+    #     row, col = divmod(doffs, input_shape[2])
+    if len(input_shape) == 2:
+        S, D = input_shape
+        hw_dim = S
+        w_dim = 1
+    else:
+        hw_dim = input_shape[1] * input_shape[2]
+        w_dim = input_shape[2]
+
+    for doffs in range(hw_dim):
+        if len(input_shape) == 2:
+            row = doffs
+            col = 0
+        else:
+            row, col = divmod(doffs, w_dim)
         this_map = next_layer_map
         coffs = coffs_start
         poffs = coffs_start
@@ -699,7 +714,13 @@ def verify(
                     if this_map & 1:
                         no_data = False
                         if c < input_shape[0]:
-                            val |= (out_buf[c][row][col] & 0xff) << 24
+                            # TODO check
+                            # val |= (out_buf[c][row][col] & 0xff) << 24
+                            if len(out_buf.shape) == 2:
+                                # out_buf is (S, D)
+                                val |= (out_buf[row][col] & 0xff) << 24
+                            else:
+                                val |= (out_buf[c][row][col] & 0xff) << 24
                         c += 1
                     this_map >>= 1
             else:
@@ -708,7 +729,12 @@ def verify(
                     if this_map & 1:
                         no_data = False
                         if c < input_shape[0]:
-                            val[i] = out_buf[c][row][col] & 0xffffffff
+                            # TODO check
+                            # val[i] = out_buf[c][row][col] & 0xffffffff
+                            if len(out_buf.shape) == 2:
+                                val[i] = out_buf[row][col] & 0xffffffff
+                            else:
+                                val[i] = out_buf[c][row][col] & 0xffffffff
                         c += 1
                     this_map >>= 1
 
