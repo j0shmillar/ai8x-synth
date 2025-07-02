@@ -378,7 +378,7 @@ def unload(
         if len(emit_list) > 0:
             if o_width == 32:
                 if prev_out_size != 4:
-                    # TODO: Resync output pointer
+                    # TODO; resync output pointer
                     pass
                 idx = 0
                 chunk = max(1, wide_chunk)
@@ -674,7 +674,7 @@ def verify(
     if unload_layer and not embedded:
         body.append(f'  // Layer {layer_str(ll)}\n')
 
-    # TODO check
+    # TODO; check
     # for doffs in range(input_shape[1] * input_shape[2]):
     #     row, col = divmod(doffs, input_shape[2])
     if len(input_shape) == 2:
@@ -714,7 +714,7 @@ def verify(
                     if this_map & 1:
                         no_data = False
                         if c < input_shape[0]:
-                            # TODO check
+                            # TODO; check
                             # val |= (out_buf[c][row][col] & 0xff) << 24
                             if len(out_buf.shape) == 2:
                                 # out_buf is (S, D)
@@ -729,7 +729,7 @@ def verify(
                     if this_map & 1:
                         no_data = False
                         if c < input_shape[0]:
-                            # TODO check
+                            # TODO; check
                             # val[i] = out_buf[c][row][col] & 0xffffffff
                             if len(out_buf.shape) == 2:
                                 val[i] = out_buf[row][col] & 0xffffffff

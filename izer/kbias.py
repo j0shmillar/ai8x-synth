@@ -66,11 +66,13 @@ def load(
         if bias[ll] is None or group_map[ll] is None:
             continue
 
-    # TODO check
     ############################################################################
+    # TODO; check
+
         # if len(bias[ll]) != output_chan[ll]:
         #     eprint(f'{layer_pfx(ll)}Output channel count {output_chan[ll]} does not match the '
         #            f'number of bias values {len(bias[ll])}.')
+        
     ############################################################################
 
         if not np.any(bias[ll] != 0):

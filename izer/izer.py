@@ -382,6 +382,9 @@ def main():
     buffer_insert = params['buffer_insert'][:layers]
     buffer_shift = params['buffer_shift'][:layers]
 
+    seq_length = params['seq_length'][:layers]
+    d_model = params['d_model'][:layers]
+
     # Command line override
     if args.input_offset is not None:
         input_offset[args.start_layer] = args.input_offset
@@ -680,6 +683,9 @@ def main():
     state.write_gap = write_gap
 
     state.cls_token = cls_token
+
+    state.seq_length = seq_length
+    state.d_model = d_model
 
     # Implied states
     if state.riscv_debug:

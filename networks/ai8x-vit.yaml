@@ -51,7 +51,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x0000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -66,7 +65,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x0000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -89,15 +87,13 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x2000
     processors: 0xffffffffffffffff  # 64 input channels
 
   - name: blocks.1.attn
     operation: mhsa
-    num_heads: 4
     d_model: 64
-    seq_length: 82
+    seq_length: 82  # 1 CLS + 9x9 patches
     out_offset: 0x0000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -105,7 +101,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x2000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -128,7 +123,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x0000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -136,7 +130,7 @@ layers:
     operation: mhsa
     num_heads: 4
     d_model: 64
-    seq_length: 82
+    seq_length: 82  # 1 CLS + 9x9 patches
     out_offset: 0x2000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -144,7 +138,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x0000
     processors: 0xffffffffffffffff  # 64 input channels
 
@@ -167,7 +160,6 @@ layers:
     operation: layernorm
     in_channels: 64
     out_channels: 64
-    d_model: 64
     out_offset: 0x2000
     processors: 0xffffffffffffffff  # 64 input channels
 

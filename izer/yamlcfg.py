@@ -168,6 +168,9 @@ def parse(
     buffer_shift = [None] * tc.dev.MAX_LAYERS
     buffer_insert = [None] * tc.dev.MAX_LAYERS
 
+    seq_length = [None] * tc.dev.MAX_LAYERS
+    d_model = [None] * tc.dev.MAX_LAYERS
+
     sequence = 0
     skip = skip_layers
     for ll in cfg['layers']:
@@ -187,7 +190,8 @@ def parse(
                                  'bias_group', 'bias_quadrant', 'calcx4', 'readahead', 'name',
                                  'pool_dilation', 'output_pad', 'tcalc', 'read_gap', 'output',
                                  'weight_source', 'buffer_shift', 'buffer_insert', 'in_crop',
-                                 'd_model', 'num_heads', 'd_ff', 'out_features', 'seq_length', 'patch_size'])
+                                 'num_heads', 'd_ff', 'out_features', 'patch_size', 
+                                 'seq_length', 'd_model'])
         if bool(cfg_set):
             eprint(f'Configuration file {config_file} contains unknown key(s) for `layers`: '
                    f'{cfg_set}.')
@@ -653,6 +657,22 @@ def parse(
                            'to be specified', sequence)
             buffer_insert[sequence] = val
 
+        if 'seq_length' in ll:
+            val = ll['seq_length']
+            if not isinstance(val, int):
+                error_exit('`seq_length` must be an integer', sequence)
+            if not val > 0:
+                error_exit('`seq_length` must be a positive integer', sequence)
+            seq_length[sequence] = val
+
+        if 'd_model' in ll:
+            val = ll['d_model']
+            if not isinstance(val, int):
+                error_exit('`d_model` must be an integer', sequence)
+            if not val > 0:
+                error_exit('`d_model` must be a positive integer', sequence)
+            d_model[sequence] = val
+
         # Fix up values for 1D convolution or no convolution
         if operator[sequence] == op.CONV1D:
             padding[sequence][1] = 0
@@ -718,6 +738,9 @@ def parse(
             del weight_source[ll]
             del buffer_shift[ll]
             del buffer_insert[ll]
+
+            del seq_length[ll]
+            del d_model[ll]
 
     if 'data_buffer' in cfg:
         for ll in cfg['data_buffer']:
@@ -884,5 +907,8 @@ def parse(
     settings['weight_source'] = weight_source
     settings['buffer_shift'] = buffer_shift
     settings['buffer_insert'] = buffer_insert
+
+    settings['seq_length'] = seq_length
+    settings['d_model'] = d_model
 
     return cfg, len(processor_map), settings

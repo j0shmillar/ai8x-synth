@@ -160,6 +160,9 @@ class Backend(backend.Backend):
         zero_unused = state.zero_unused
 
         cls_token = state.cls_token
+        seq_length = state.seq_length
+        d_model = state.d_model
+
 
         if not os.path.isdir('assets'):
             eprint('The assets folder is missing from the current directory.')
@@ -3004,7 +3007,6 @@ class Backend(backend.Backend):
                 if input_crop[ll][0] != 0 or input_crop[ll][1] != 0:  # line skip count
                     data = data[:, :, input_crop[ll][0]:-input_crop[ll][1], :]
                 
-                print(f"shape 1 {data.shape}")
                 if operator[ll] == op.CONV1D:
                     if in_sequences[ll] != [-2]:
                         assert input_dim[ll][1] == 1
@@ -3014,7 +3016,6 @@ class Backend(backend.Backend):
                         data = data.reshape(data.shape[0], -1, input_dim[ll][0])
                 # elif buffer_shift[ll] is None:
                 #     data = data.reshape(data.shape[0], -1, input_dim[ll][0], input_dim[ll][1])
-                print(f"shape 2 {data.shape}")
 
                 # In-flight pooling
                 data, out_size = pooling_layer(
@@ -3042,19 +3043,23 @@ class Backend(backend.Backend):
                         np.save(datafile, data, allow_pickle=False, fix_imports=False)
                     else:
                         np.save(datafile, np.empty((0)), allow_pickle=False, fix_imports=False)
+                
+                ############################################################################
+                # TODO; check
 
-                if operator[ll] == op.CONV1D:
-                    if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or pooled_dim[ll][1] != 1:
-                        eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
-                               f'Expected: {in_chan}x{pooled_dim[ll][0]}, '
-                               f'got {out_size[0]}x{out_size[1]}.')
-                elif data.ndim == 3:
-                    print("TODO; fix")       
-                elif buffer_shift[ll] is None:
-                    if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or out_size[2] != pooled_dim[ll][1]:
-                        eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
-                               f'Expected: {in_chan}x{pooled_dim[ll][0]}x{pooled_dim[ll][1]}, '
-                               f'got {out_size[0]}x{out_size[1]}x{out_size[2]}.')
+                if not data.ndim == 3:
+                    if operator[ll] == op.CONV1D:
+                        if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or pooled_dim[ll][1] != 1:
+                            eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
+                                f'Expected: {in_chan}x{pooled_dim[ll][0]}, '
+                                f'got {out_size[0]}x{out_size[1]}.')    
+                    elif buffer_shift[ll] is None:
+                        if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or out_size[2] != pooled_dim[ll][1]:
+                            eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
+                                f'Expected: {in_chan}x{pooled_dim[ll][0]}x{pooled_dim[ll][1]}, '
+                                f'got {out_size[0]}x{out_size[1]}x{out_size[2]}.')
+                            
+                ############################################################################
 
                 if operands[ll] > 1 and pool_first[ll]:
                     data = run_eltwise(data, ll)
@@ -3115,10 +3120,11 @@ class Backend(backend.Backend):
                         bypass=bypass[ll],
                         datafile=datafile,
                     )
-# TODO check
+
 ###################################################################################################
+# TODO; check
+
                 elif operator[ll] == op.LINEAR:
-                    # handle linear layers properly
                     if flatten[ll]:
                         in_chan *= pooled_dim[ll][0] * pooled_dim[ll][1]
                         data = data.reshape(-1)
@@ -3128,9 +3134,8 @@ class Backend(backend.Backend):
                         in_chan
                     )
                     out_list = []
-                    # TODO check thoroughly
-                    for i in range(data.shape[1]):  # 82 tokens
-                        token = data[:, i]  # shape: (64,)
+                    for i in range(data.shape[1]): 
+                        token = data[:, i]  
                         out_token, _ = linear_layer(
                             ll,
                             activation[ll],
@@ -3140,8 +3145,9 @@ class Backend(backend.Backend):
                         )
                         out_list.append(out_token)
 
-                    out_buf = np.stack(out_list, axis=1)  # shape: (128, 82)
+                    out_buf = np.stack(out_list, axis=1) 
                     out_size = out_buf.shape
+
 ###################################################################################################
                 elif operator[ll] == op.CONVTRANSPOSE2D:
                     if not bypass[ll]:
@@ -3218,18 +3224,15 @@ class Backend(backend.Backend):
                     )
 ###################################################################################################
                 elif operator[ll] == op.MHSA:
-                    print('in mhsa op (max7800x)')
                     out_buf, out_size = mhsa_layer(
                         ll,
-                        data.shape,
                         kernel[kernel_ptrs[ll]],
                         bias[bias_ptrs[ll]],
                         data,
                         output_width=output_width[ll],
-                        cls_token = cls_token, # TODO fix; softcode
-                        d_model = 64,  # TODO fix; softcode
-                        seq_length=82 # TODO fix; softcode
-                        # num_heads=num_heads[ll],
+                        cls_token = cls_token, 
+                        d_model = d_model[ll], 
+                        seq_length=seq_length[ll], 
                     )
                 elif operator[ll] == op.LAYER_NORM:
                     out_buf, out_size = layernorm_layer(
@@ -3238,7 +3241,9 @@ class Backend(backend.Backend):
                         kernel[kernel_ptrs[ll]],
                         bias[bias_ptrs[ll]],
                         data,
+                        activation[ll],
                         output_width=output_width[ll],
+                        n_channels_out=output_chan[ll]
                     )
                 # elif operator[ll] == op.PATCH_EMBED:
                 #     out_buf, out_size = patch_embed_layer(
@@ -3296,8 +3301,9 @@ class Backend(backend.Backend):
                     # Operator output
                     np.save(datafile, out_buf, allow_pickle=False, fix_imports=False)
 
-                # TODO check
                 ############################################################################
+                # TODO; check
+
                 if buffer_shift[ll] is None:
                     if len(out_size) == 2:
                         assert out_size[0] == output_chan[ll] \
@@ -3314,6 +3320,7 @@ class Backend(backend.Backend):
                     assert out_size[1] == output_size[ll][0] \
                         and out_size[0] - buffer_shift[ll] == output_size[ll][1] \
                         and out_size[2] == output_size[ll][2]
+                    
                 ############################################################################
 
                 # Write .mem file for output or create the C check_output() function to

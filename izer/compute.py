@@ -195,8 +195,6 @@ def conv1d(
 
     Note that all PyTorch numbers are ordered (C, L)
     """
-    print(data.shape)
-    print(tuple(input_size))
     assert data.shape == tuple(input_size)
     in_channels = input_size[0]
     out_channels = output_size[0]

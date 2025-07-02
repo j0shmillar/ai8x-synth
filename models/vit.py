@@ -86,11 +86,9 @@ class TransformerBlock(nn.Module):
         return x
 
 class ViT(nn.Module):
-    def __init__(self, img_size=(28, 28), patch_size=7, in_channels=1, num_classes=10,
+    def __init__(self, img_size=(28, 28), patch_size=1, in_channels=1, num_classes=10,
                  d_model=64, num_heads=4, num_layers=4, d_ff=128, dropout=0.1):
         super().__init__()
-
-        patch_size = 1 # TODO fix
         
         self.patch_embed = PatchEmbedding(
             img_size=img_size,

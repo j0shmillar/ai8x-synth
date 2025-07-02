@@ -216,4 +216,6 @@ write_count: int = 0
 zero_sram: bool = False
 zero_unused: bool = False
 
-cls_tokens: Dict = {}
+cls_token: int = 0
+seq_length: List[int] = []
+d_model: List[int] = []

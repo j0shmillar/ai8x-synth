@@ -461,6 +461,7 @@ def conv1d_layer(
 
     return out_buf, out_size
 
+########################################################################################################################
 
 # def linear_layer(
 #         layer,
@@ -608,6 +609,8 @@ def linear_layer(
 
     return output, out_features
 
+########################################################################################################################
+
 def passthrough_layer(
         layer,  # pylint: disable=unused-argument
         input_size,
@@ -696,8 +699,9 @@ def eltwise_layer(
 
     return out_buf, input_size
 
-# TODO - modified, so check
+
 ########################################################################################################################
+# TODO; check
 
 def pooling_layer(
         layer,
@@ -867,22 +871,85 @@ def pooling_layer(
 
 ########################################################################################################################
 
-def layernorm_layer(           # pylint: disable=too-many-arguments
+# def layernorm_layer(           # pylint: disable=too-many-arguments
+#         layer: int,
+#         input_size,
+#         kernel: np.ndarray,
+#         bias:   np.ndarray,
+#         data:   np.ndarray,
+#         activation:   np.ndarray,
+#         output_width: int = 8,
+# ):
+#     """
+#     2 modes supported:
+
+#     1.  Token LN   data shape = (S , D)      weight = (D,)
+#         each (row) is scaled / shifted element-wise.
+
+#     2.  Feature LN data shape = (C , H , W)  weight = (C,)
+#         every spatial location (h,w) is scaled by the channel-wise gain.
+#     """
+#     verbose_data = state.verbose_all or state.output_layer[layer]
+
+#     if state.verbose:
+#         print(f"LAYER {layer_str(layer)} (LAYER-NORM)...\n")
+#         if state.verbose_all:
+#             print_data1d(True, "SCALE  (γ)", kernel.reshape(-1))
+#             print_data1d(True, "OFFSET (β)", None if bias is None else bias.reshape(-1))
+
+#     if data.ndim == 2:                         # (S , D)  ------ token LN
+#         out_buf, out_shape = layernorm(
+#             layer,
+#             input_size,
+#             kernel,
+#             bias,
+#             data,
+#             output_width,
+#         )
+#     elif data.ndim == 3:                       # (C , H , W) -- feature-map LN
+#         C, H, W = data.shape
+#         assert kernel.size == C, \
+#             f"LayerNorm: expected {C} scale values, got {kernel.size}"
+
+#         scale = kernel.reshape(C, 1, 1).astype(np.int64)
+#         shift = bias.reshape(C, 1, 1).astype(np.int64) if bias is not None else 0
+
+#         out_buf = data * scale + shift        # element-wise affine
+#         out_shape = out_buf.shape
+
+#         # register “true SW MACCs”: one multiply per element
+#         stats.account(layer, "true_sw_macc", np.prod(out_shape))
+
+#     else:
+#         raise ValueError(f"LayerNorm: unsupported input rank {data.ndim}")
+
+#     if output_width == 8:
+#         np.clip(out_buf, -128, 127, out_buf)
+
+#     if state.verbose and verbose_data:
+#         print(f"OUTPUT {out_shape}:")
+#         print(out_buf)
+#         print('')
+
+#     if out_shape[0] != n_channels_out: 
+#         out_buf = out_buf.T
+#         out_shape = out_buf.shape
+
+#     return out_buf, out_shape
+
+# TODO; check 
+def layernorm_layer(
         layer: int,
         input_size,
         kernel: np.ndarray,
         bias:   np.ndarray,
         data:   np.ndarray,
+        activation:   np.ndarray,
+        n_channels_out: int,
         output_width: int = 8,
 ):
     """
-    2 modes supported:
-
-    1.  Token LN   data shape = (S , D)      weight = (D,)
-        each (row) is scaled / shifted element-wise.
-
-    2.  Feature LN data shape = (C , H , W)  weight = (C,)
-        every spatial location (h,w) is scaled by the channel-wise gain.
+    LayerNorm hardware emulation using Conv1D for affine scaling on the NPU.
     """
     verbose_data = state.verbose_all or state.output_layer[layer]
 
@@ -892,29 +959,74 @@ def layernorm_layer(           # pylint: disable=too-many-arguments
             print_data1d(True, "SCALE  (γ)", kernel.reshape(-1))
             print_data1d(True, "OFFSET (β)", None if bias is None else bias.reshape(-1))
 
-    if data.ndim == 2:                         # (S , D)  ------ token LN
-        out_buf, out_shape = layernorm(
+    kernel = np.squeeze(kernel)
+
+    if data.ndim == 2:  # Token LN (S, D)
+        d_model, seq_len = data.shape
+
+        # Reshape for Conv1D: (d_model, seq_len, 1)
+        data_hw = data[:, :, np.newaxis]
+
+        # Prepare kernel for Conv1D: shape (d_model, d_model, 1)
+        kernel_diag = np.zeros((d_model, d_model, 1), dtype=np.int64)
+        for i in range(d_model):
+            # kernel_diag[i, i, 0] = kernel[i]
+            kernel_diag[i, i, 0] = int(kernel[i]) 
+
+        # Bias shape: (d_model,)
+        bias_vec = bias if bias is not None else np.zeros_like(kernel)
+
+        # Perform affine scaling with Conv1D
+        out_buf, _ = conv1d_layer(
             layer,
-            input_size,
-            kernel,
-            bias,
-            data,
-            output_width,
+            input_size=(d_model, seq_len, 1),
+            kernel_size=1,
+            output_shift=0,
+            output_channels=d_model,
+            padding=0,
+            dilation=1,
+            stride=1,
+            activation=None,
+            kernel=kernel_diag,
+            bias=bias_vec,
+            data=data_hw,
+            output_width=output_width,
         )
 
-    elif data.ndim == 3:                       # (C , H , W) -- feature-map LN
+        out_buf = out_buf.squeeze(-1).T  # shape (seq_len, d_model)
+
+    elif data.ndim == 3:  # Feature LN (C, H, W)
         C, H, W = data.shape
-        assert kernel.size == C, \
-            f"LayerNorm: expected {C} scale values, got {kernel.size}"
 
-        scale = kernel.reshape(C, 1, 1).astype(np.int64)
-        shift = bias.reshape(C, 1, 1).astype(np.int64) if bias is not None else 0
+        # Reshape to (C, H*W, 1)
+        data_hw = data.reshape(C, H*W, 1)
 
-        out_buf = data * scale + shift        # element-wise affine
-        out_shape = out_buf.shape
+        # Prepare kernel: shape (C, C, 1)
+        kernel_diag = np.zeros((C, C, 1), dtype=np.int64)
+        for i in range(C):
+            kernel_diag[i, i, 0] = kernel[i]
 
-        # register “true SW MACCs”: one multiply per element
-        stats.account(layer, "true_sw_macc", np.prod(out_shape))
+        bias_vec = bias if bias is not None else np.zeros_like(kernel)
+
+        # Perform affine scaling with Conv1D
+        out_buf, _ = conv1d_layer(
+            layer,
+            input_size=(C, H*W, 1),
+            kernel_size=1,
+            output_shift=0,
+            output_channels=C,
+            padding=0,
+            dilation=1,
+            stride=1,
+            activation=None,
+            kernel=kernel_diag,
+            bias=bias_vec,
+            data=data_hw,
+            output_width=output_width,
+        )
+
+        # Reshape back to (C, H, W)
+        out_buf = out_buf.squeeze(-1).reshape(C, H, W)
 
     else:
         raise ValueError(f"LayerNorm: unsupported input rank {data.ndim}")
@@ -923,15 +1035,15 @@ def layernorm_layer(           # pylint: disable=too-many-arguments
         np.clip(out_buf, -128, 127, out_buf)
 
     if state.verbose and verbose_data:
-        print(f"OUTPUT {out_shape}:")
+        print(f"OUTPUT {out_buf.shape}:")
         print(out_buf)
         print('')
 
-    if out_shape[0] != 64: # TODO fix; softcode
+    if out_buf.shape[0] != n_channels_out:
         out_buf = out_buf.T
-        out_shape = out_buf.shape
 
-    return out_buf, out_shape
+    return out_buf, out_buf.shape
+
 
 # TODO; missing Q,K,V LayerNorm
 # def mhsa_layer(
@@ -1011,15 +1123,14 @@ def layernorm_layer(           # pylint: disable=too-many-arguments
 #     out_transposed = out.T
 #     return out_transposed, out_transposed.shape
 
+# TODO; missing q,k,v layernorm
 def mhsa_layer(
-        layer,
-        input_size,      
+        layer,  
         kernels,         
         biases, 
         data,
         output_width=8,
-        num_heads=4,
-        cls_tokens=None,
+        cls_token=None,
         d_model=64,
         seq_length=82,
 ):
@@ -1064,7 +1175,7 @@ def mhsa_layer(
         b_q = b_k = b_v = b_o = None
 
     # Determine if cls_token needs to be prepended
-    if cls_tokens is not None:
+    if cls_token is not None:
         expected_seq_len_without_cls = seq_len - 1
     else:
         expected_seq_len_without_cls = seq_len
@@ -1072,7 +1183,7 @@ def mhsa_layer(
     if data.shape[0] == expected_seq_len_without_cls:
         # Need to prepend cls_token
         data_reshaped = data.reshape(-1, d_model)             # (seq_len - 1, d_model)
-        cls_token_squeezed = np.squeeze(cls_tokens, axis=0)   # (1, d_model)
+        cls_token_squeezed = np.squeeze(cls_token, axis=0)   # (1, d_model)
         data_with_cls = np.concatenate((cls_token_squeezed, data_reshaped), axis=0)  # (seq_len, d_model)
     elif data.shape[0] == seq_len:
         # cls_token already present, do not add again
@@ -1289,9 +1400,10 @@ def show_data(
                 op_string = f"LAYER {layer_str(layer)} ({op.string(operation).upper()}, " \
                             f"{operands} OPERANDS)...\n"
             print(op_string)
-
-# TODO check     
+  
 ###################################################################################################
+# TODO; check   
+
             if operands == 1:
                 if data.ndim == 3:
                     print_data(verbose_input,
@@ -1322,4 +1434,5 @@ def show_data(
                 print(':')
                 print(np.squeeze(data))
             print('')
+
 ###################################################################################################

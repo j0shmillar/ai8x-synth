@@ -12,7 +12,7 @@ from tqdm import tqdm
 from models.vit import ViT
 
 input_size = (28, 28)
-patch_size = 3
+patch_size = 1
 input_channels = 1
 d_model = 64
 num_heads = 4

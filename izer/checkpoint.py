@@ -91,15 +91,9 @@ def load(
         
         print(f"Loading {k}...")
 
-        ############################################################################
-
-        # TODO fix
         if 'cls_token' in k:
             cls_token = checkpoint_state[k].numpy().astype(np.int64)
 
-        ############################################################################
-
-        # Skip over non-weight and duplicated weight layers
         while seq < len(operator) and (operator[seq] == op.NONE or bypass[seq] or weight_source[seq] is not None):
             seq += 1
         param_levels = k.rsplit(sep='.', maxsplit=2)
@@ -112,8 +106,9 @@ def load(
         
         ############################################################################
         # TODO; support pos_embed?
+
         attn = 0
-        if 'weight' in parameter: # TODO - check (old: if parameter in ['weight'])
+        if 'weight' in parameter:
             if 'attn' in k:
                 print('attn_layer')
                 attn = 1
@@ -131,7 +126,7 @@ def load(
             else:
                 w = checkpoint_state[k].numpy().astype(np.int64)
 
-            # TODO fix - pull out into function
+            # TODO; pull out into func
             if attn and attn_cnt == 1:
                 bias_name = '.'.join([layer, this_op, 'in_proj_bias']) # TODO fix; softcode
                 wb_name = '.'.join([layer, 'weight_bits'])
