@@ -159,7 +159,7 @@ class Backend(backend.Backend):
         zero_sram = state.zero_sram
         zero_unused = state.zero_unused
 
-        cls_tokens = state.cls_tokens 
+        cls_token = state.cls_token
 
         if not os.path.isdir('assets'):
             eprint('The assets folder is missing from the current directory.')
@@ -3226,7 +3226,7 @@ class Backend(backend.Backend):
                         bias[bias_ptrs[ll]],
                         data,
                         output_width=output_width[ll],
-                        cls_tokens = cls_tokens[0], # TODO fix; softcode
+                        cls_token = cls_token, # TODO fix; softcode
                         d_model = 64,  # TODO fix; softcode
                         seq_length=82 # TODO fix; softcode
                         # num_heads=num_heads[ll],

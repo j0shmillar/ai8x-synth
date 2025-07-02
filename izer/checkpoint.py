@@ -80,13 +80,13 @@ def load(
     num_conv_layers = len(quantization)
     output_channels = []
     input_channels = []
+    cls_token = np.array([])
     param_count = 0
     param_size = 0
     error_exit = False
     seq = 0
     
     attn_cnt = 0
-    cls_tokens = {}
     for k in checkpoint_state.keys():
         
         print(f"Loading {k}...")
@@ -95,7 +95,7 @@ def load(
 
         # TODO fix
         if 'cls_token' in k:
-            cls_tokens[seq] = checkpoint_state[k].numpy().astype(np.int64)
+            cls_token = checkpoint_state[k].numpy().astype(np.int64)
 
         ############################################################################
 
@@ -111,7 +111,7 @@ def load(
             continue
         
         ############################################################################
-        # TODO; how to support cls_token and pos_embed?
+        # TODO; support pos_embed?
         attn = 0
         if 'weight' in parameter: # TODO - check (old: if parameter in ['weight'])
             if 'attn' in k:
@@ -347,4 +347,4 @@ def load(
     if error_exit:
         sys.exit(1)
 
-    return layers, weights, bias, output_shift, input_channels, output_channels, final_scale, cls_tokens
+    return layers, weights, bias, output_shift, input_channels, output_channels, final_scale, cls_token
