@@ -3654,7 +3654,7 @@ class Backend(backend.Backend):
                         output_count += output_chan[i] * output_dim[i][0] * output_dim[i][1]
             insert = summary_stats + \
                 '\n/* Number of outputs for this network */\n' \
-                f'#define CNN_NUM_OUTPUTS {output_count}'
+                f'#define CNN_NUM_OUTPUTS {output_count}' # TODO - why does output_count = 810?
             if timer is not None:
                 insert += '\n\n/* Use this timer to time the inference */\n' \
                           f'#define CNN_INFERENCE_TIMER MXC_TMR{timer}'

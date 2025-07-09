@@ -5,8 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 import os
-import onnx
-import onnxsim
+import numpy as np
 from tqdm import tqdm
 
 from models.vit import ViT
@@ -31,6 +30,16 @@ pin_memory = True
 
 mean = [0.1307]
 std = [0.3081]
+
+def to_c_header(arr, var_name="SAMPLE_INPUT_0"):
+    flat = arr.flatten()
+    # format values to 0x000000XX (8-digit zero-padded hex)
+    hex_vals = [f"0x{int(v)&0xFF:08x}" for v in flat]
+    lines = []
+    for i in range(0, len(hex_vals), 8):
+        lines.append("  " + ", ".join(hex_vals[i:i+8]) + ",")
+    header = f"// This file was @generated automatically\n\n#define {var_name} {{ \\\n" + " \\\n".join(lines) + " \\\n}"
+    return header
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
     model.train()
@@ -125,6 +134,13 @@ def main():
                               num_workers=num_workers, pin_memory=pin_memory)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, pin_memory=pin_memory)
+
+    # for data, _ in train_loader:
+    #     image = np.clip(data.cpu().detach().numpy() * 127, -128, 127).astype(np.int8)  # for q7_t
+    #     header_str = to_c_header(image)
+    #     with open("sample_input.h", "w") as f:
+    #         f.write(header_str)
+    #     break
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)

@@ -13,7 +13,7 @@ import numpy as np
 
 from . import op, state, stats
 from . import tornadocnn as tc
-from .compute import conv1d, conv2d, convtranspose2d, eltwise, linear, pool1d, pool2d, layernorm, mhsa
+from .compute import conv1d, conv2d, convtranspose2d, eltwise, pool1d, pool2d
 from .names import layer_str
 
 
@@ -949,34 +949,34 @@ def layernorm_layer(
         output_width: int = 8,
 ):
     """
-    LayerNorm hardware emulation using Conv1D for affine scaling on the NPU.
+    LayerNorm using Conv1D for affine scaling
     """
     verbose_data = state.verbose_all or state.output_layer[layer]
 
     if state.verbose:
         print(f"LAYER {layer_str(layer)} (LAYER-NORM)...\n")
         if state.verbose_all:
-            print_data1d(True, "SCALE  (γ)", kernel.reshape(-1))
-            print_data1d(True, "OFFSET (β)", None if bias is None else bias.reshape(-1))
+            print_data1d(True, "SCALE", kernel.reshape(-1))
+            print_data1d(True, "OFFSET", None if bias is None else bias.reshape(-1))
 
     kernel = np.squeeze(kernel)
 
-    if data.ndim == 2:  # Token LN (S, D)
+    if data.ndim == 2:  # token LN (S, D)
         d_model, seq_len = data.shape
 
-        # Reshape for Conv1D: (d_model, seq_len, 1)
+        # reshape for Conv1D: (d_model, seq_len, 1)
         data_hw = data[:, :, np.newaxis]
 
-        # Prepare kernel for Conv1D: shape (d_model, d_model, 1)
+        # prep kernel for Conv1D: shape (d_model, d_model, 1)
         kernel_diag = np.zeros((d_model, d_model, 1), dtype=np.int64)
         for i in range(d_model):
             # kernel_diag[i, i, 0] = kernel[i]
             kernel_diag[i, i, 0] = int(kernel[i]) 
 
-        # Bias shape: (d_model,)
+        # bias shape: (d_model,)
         bias_vec = bias if bias is not None else np.zeros_like(kernel)
 
-        # Perform affine scaling with Conv1D
+        # affine scaling with Conv1D
         out_buf, _ = conv1d_layer(
             layer,
             input_size=(d_model, seq_len, 1),
@@ -995,20 +995,20 @@ def layernorm_layer(
 
         out_buf = out_buf.squeeze(-1).T  # shape (seq_len, d_model)
 
-    elif data.ndim == 3:  # Feature LN (C, H, W)
+    elif data.ndim == 3:  # feature LN (C, H, W)
         C, H, W = data.shape
 
-        # Reshape to (C, H*W, 1)
+        # reshape to (C, H*W, 1)
         data_hw = data.reshape(C, H*W, 1)
 
-        # Prepare kernel: shape (C, C, 1)
+        # prep kernel: shape (C, C, 1)
         kernel_diag = np.zeros((C, C, 1), dtype=np.int64)
         for i in range(C):
             kernel_diag[i, i, 0] = kernel[i]
 
         bias_vec = bias if bias is not None else np.zeros_like(kernel)
 
-        # Perform affine scaling with Conv1D
+        # affine scaling with Conv1D
         out_buf, _ = conv1d_layer(
             layer,
             input_size=(C, H*W, 1),
@@ -1025,7 +1025,7 @@ def layernorm_layer(
             output_width=output_width,
         )
 
-        # Reshape back to (C, H, W)
+        # reshape back to (C, H, W)
         out_buf = out_buf.squeeze(-1).reshape(C, H, W)
 
     else:
@@ -1082,15 +1082,12 @@ def layernorm_layer(
 #     else:
 #         b_q = b_k = b_v = b_o = None
 
-#     # Prepend CLS token
 #     data_reshaped = data.reshape(-1, d_model)   # (81, 64)
 #     cls_tokens_squeezed = np.squeeze(cls_tokens, axis=0)  # (1, 64)
 #     data_with_cls = np.concatenate((cls_tokens_squeezed, data_reshaped), axis=0)  # (82, 64)
 
 #     # x = torch.cat([cls_token, x], dim=1)  # (B, 1 + n_patches, d_model) ?
 
-
-#     # Prepare outputs
 #     q_list, k_list, v_list = [], [], []
 
 #     for i in range(seq_len):
@@ -1135,12 +1132,11 @@ def mhsa_layer(
         seq_length=82,
 ):
     """
-    Fully hardware-accelerated MHSA using Conv1D to replace linear projections,
-    suitable for MAX78000 hardware.
+    MHSA using Conv1D to replace linear projections.
     """
 
     # =============================
-    # Ensure data shape: (seq_len, d_model)
+    # ensure data shape: (seq_len, d_model)
     if data.ndim == 3 and data.shape[0] == d_model:
         # (d_model, H, W) -> flatten spatial dims
         seq_len = data.shape[1] * data.shape[2]
@@ -1158,7 +1154,7 @@ def mhsa_layer(
 
     seq_len = seq_length
 
-    # Extract and reshape kernels for hardware Conv1D
+    # extract kernels for hardware Conv1D
     kernels = kernels.squeeze(0)  # shape: (256, 64)
 
     w_q = kernels[:64].reshape(d_model, d_model, 1)    # (out_channels, in_channels, 1)
@@ -1174,27 +1170,26 @@ def mhsa_layer(
     else:
         b_q = b_k = b_v = b_o = None
 
-    # Determine if cls_token needs to be prepended
     if cls_token is not None:
         expected_seq_len_without_cls = seq_len - 1
     else:
         expected_seq_len_without_cls = seq_len
 
     if data.shape[0] == expected_seq_len_without_cls:
-        # Need to prepend cls_token
+        # need to prepend cls_token
         data_reshaped = data.reshape(-1, d_model)             # (seq_len - 1, d_model)
         cls_token_squeezed = np.squeeze(cls_token, axis=0)   # (1, d_model)
         data_with_cls = np.concatenate((cls_token_squeezed, data_reshaped), axis=0)  # (seq_len, d_model)
     elif data.shape[0] == seq_len:
-        # cls_token already present, do not add again
+        # cls_token already pre-pended, do not add again
         data_with_cls = data
     else:
         raise ValueError(f"mhsa_layer: Unexpected data shape {data.shape}, expected {expected_seq_len_without_cls} or {seq_len} tokens")
 
-    # Reshape for conv1d_layer: (d_model, seq_len, 1)
+    # reshape for conv1d_layer: (d_model, seq_len, 1)
     data_hw = data_with_cls.T[:, :, np.newaxis]
 
-    # Perform Q, K, V projections using Conv1D
+    # Q, K, V proj using Conv1D
     q, _ = conv1d_layer(
         layer,
         input_size=(d_model, seq_len, 1),
@@ -1243,10 +1238,11 @@ def mhsa_layer(
         output_width=output_width,
     )
 
-    # Compute attn = (q + k + v) // 3 using CPU for simplicity (or add hardware eltwise if desired)
+    # compute attn = (q + k + v) // 3 for simplicity
+    # TODO; fix 
     attn = (q + k + v) // 3
 
-    # Perform output projection using Conv1D
+    # output proj using Conv1D
     out, _ = conv1d_layer(
         layer,
         input_size=(d_model, seq_len, 1),
@@ -1263,7 +1259,6 @@ def mhsa_layer(
         output_width=output_width,
     )
 
-    # Squeeze last dim: shape (d_model, seq_len)
     out_squeezed = out.squeeze(-1)
 
     if output_width == 8:
@@ -1274,26 +1269,12 @@ def mhsa_layer(
         print(out_squeezed)
         print('')
 
-    # =======================
-    # ACCOUNT FOR MACCS
-    # =======================
-    # Each projection uses:
-    # (in_channels // groups) * kernel_size * out_channels * output_width
-    # Here:
-    # - in_channels = d_model
-    # - kernel_size = 1
-    # - out_channels = d_model
-    # - output_width = seq_len
-    #
-    # We perform 4 projections: Q, K, V, and out_proj
-
     maccs_per_projection = d_model * 1 * d_model * seq_len
     stats.account(layer, "macc", 4 * maccs_per_projection)
 
     # if out_squeezed.ndim == 2:
     #     out_squeezed = out_squeezed.T[:, :, np.newaxis] 
 
-    # =======================
     # return out_squeezed, out_squeezed.shape
     return out_squeezed, out_squeezed.shape
 
@@ -1307,7 +1288,7 @@ def patch_embed_layer(
         cls_token = None,
         pos_embed = None
 ):
-    # ---------------- first conv 1→d_model -----------------
+    # ---------------- first conv 1->d_model -----------------
     x = conv2d(
         data,
         kernels[0],
@@ -1323,7 +1304,7 @@ def patch_embed_layer(
     )
     # x = np.maximum(0, x)  # ReLU
 
-    # ---------------- second conv d_model→d_model ----------
+    # ---------------- second conv d_model->d_model ----------
     x = conv2d(
         x,
         kernels[1],
@@ -1339,7 +1320,7 @@ def patch_embed_layer(
     )
     # x = np.maximum(0, x)
 
-    # ---------------- third conv  stride = patch_size ------
+    # ---------------- third conv stride = patch_size ---------
     out_h = (x.shape[1] + 2*1 - 3) // patch_size + 1   # pad=1, k=3
     out_w = (x.shape[2] + 2*1 - 3) // patch_size + 1
     x = conv2d(
@@ -1356,20 +1337,19 @@ def patch_embed_layer(
         output_pad=(0, 0),
     )
 
-    # --------------- flatten to (tokens, d_model) ----------
+    # --------------- flatten to (tokens, d_model) -----------
     d_model = x.shape[0]
     tokens  = x.reshape(d_model, -1).T            # (num_patches, d_model)
 
-    # --------------- prepend CLS token ---------------------
+    # --------------- prepend cls token ----------------------
     if cls_token is not None:
         cls_tok = cls_token.reshape(1, d_model)
         tokens  = np.vstack((cls_tok, tokens))
 
-    # --------------- add positional embedding --------------
+    # --------------- add pos embed --------------------------
     if pos_embed is not None:
         tokens += pos_embed[:tokens.shape[0], :]
 
-    # return in (sequence, dim) order expected by later layers
     return tokens, tokens.shape
 
 ########################################################################################################################

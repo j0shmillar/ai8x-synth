@@ -20,6 +20,7 @@ from typing import Optional
 from . import op, state, stats
 from .eprint import eprint
 
+# TODO; clear (don't actually use any new funcs)
 
 def debug_open(
         layer: int,
@@ -526,10 +527,8 @@ def mhsa(
     if b_k is not None:  k += b_k
     if b_v is not None:  v += b_v
 
-    # “attention” = mean of the heads (no soft-max)
     attn = (q + k + v) / 3
 
-    # output projection
     out = attn @ w_o.T
     if b_o is not None:
         out += b_o

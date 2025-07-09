@@ -78,11 +78,8 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
-        print(x.shape)
         x = self.norm2(x)
-        print(x.shape)
         x = x + self.ff(x)
-        print(x.shape)
         return x
 
 class ViT(nn.Module):
@@ -114,11 +111,13 @@ class ViT(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
+        print(x.shape)
         x = self.patch_embed(x)
         # print(x.shape)
         for block in self.blocks:
             x = block(x)
         x = self.norm(x)
+        print(self.head(x[:, 0]).shape)
         return self.head(x[:, 0])  # CLS token
 
 def create_model(**kwargs):

@@ -32,7 +32,7 @@ layers:
     in_channels: 64
     out_channels: 64
     out_offset: 0x0000
-    processors: 0xffffffffffffffff  
+    processors: 0xffffffffffffffff
 
   - name: patch_embed.conv.2
     avg_pool: 3
@@ -44,7 +44,7 @@ layers:
     in_channels: 64
     out_channels: 64
     out_offset: 0x2000
-    processors: 0xffffffffffffffff 
+    processors: 0xffffffffffffffff
 
   # -------------------- Transformer Block 0 --------------------
   - name: blocks.0.norm1
