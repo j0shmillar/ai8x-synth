@@ -97,7 +97,7 @@ def main():
         else:
             # PyTorch checkpoint file selected
             layers, weights, bias, output_shift, \
-                input_channels, output_channels, final_scale, cls_token = \
+                input_channels, output_channels, final_scale, cls_token, pos_embed = \
                 checkpoint.load(
                     args.checkpoint_file,
                     cfg['arch'],
@@ -113,6 +113,7 @@ def main():
                     params['weight_source'],
                     args.skip_checkpoint_layers,
                 )
+            print(layers)
     else:  # Get some hard-coded sample weights
         layers, weights, output_shift, \
             input_channels, output_channels = \
@@ -683,6 +684,7 @@ def main():
     state.write_gap = write_gap
 
     state.cls_token = cls_token
+    state.pos_embed = pos_embed
 
     state.seq_length = seq_length
     state.d_model = d_model

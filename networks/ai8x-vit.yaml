@@ -1,5 +1,6 @@
 ---
-arch: ai85_vit_decomposed
+# arch: ai85_vit_decomposed
+arch: ai85_vit
 dataset: MNIST
 
 layers:
@@ -56,6 +57,8 @@ layers:
 
   - name: blocks.0.attn
     operation: mhsa
+    in_channels: 64
+    out_channels: 64
     d_model: 64
     seq_length: 82  # 1 CLS + 9x9 patches
     out_offset: 0x2000

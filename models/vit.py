@@ -2,6 +2,25 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# def resize_pos_embed(self, x):
+#     if x.shape[1] != self.pos_embed.shape[1]:
+#         pos_embed = self.pos_embed
+#         cls_pos = pos_embed[:, 0:1, :]
+#         patch_pos = pos_embed[:, 1:, :]
+
+#         H, W = self.grid_size
+#         patch_pos = patch_pos.reshape(1, H, W, -1).permute(0, 3, 1, 2)
+
+#         new_H = int((x.shape[1] - 1) ** 0.5)
+#         patch_pos = F.interpolate(patch_pos, size=(new_H, new_H), mode='bicubic', align_corners=False)
+
+#         patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, -1, self.d_model)
+#         pos_embed = torch.cat([cls_pos, patch_pos], dim=1)
+#     else:
+#         pos_embed = self.pos_embed
+#     return pos_embed
+
+
 class PatchEmbedding(nn.Module):
     def __init__(self, img_size, patch_size, in_channels, d_model):
         super().__init__()
@@ -16,9 +35,15 @@ class PatchEmbedding(nn.Module):
         self.pool = nn.AvgPool2d(kernel_size=3, stride=3)
         self.relu = nn.ReLU()
 
+        # H, W = img_size
+        # self.grid_size = (H // patch_size, W // patch_size)
+        # num_patches = self.grid_size[0] * self.grid_size[1]
+
         H, W = img_size
-        self.grid_size = (H // patch_size, W // patch_size)
+        self.grid_size = (H // (patch_size * 3), W // (patch_size * 3))  # adjusted for pooling
         num_patches = self.grid_size[0] * self.grid_size[1]
+        self.pos_embed = nn.Parameter(torch.randn(1, 1 + num_patches, d_model) * 0.02)
+
 
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
         self.pos_embed = nn.Parameter(torch.randn(1, 1 + num_patches, d_model) * 0.02)
@@ -35,29 +60,29 @@ class PatchEmbedding(nn.Module):
         x = self.pool(x)
 
         x = x.flatten(2).transpose(1, 2)  # (B, n_patches, d_model)
-        n_patches = x.shape[1]
 
         cls_token = self.cls_token.expand(B, -1, -1)  # (B, 1, d_model)
         x = torch.cat([cls_token, x], dim=1)  # (B, 1 + n_patches, d_model)
+        # if x.shape[1] != self.pos_embed.shape[1]:
+        #     pos_embed = self.pos_embed
+        #     cls_pos = pos_embed[:, 0:1, :]  # (1, 1, d_model)
+        #     patch_pos = pos_embed[:, 1:, :]  # (1, N, d_model)
 
-        if x.shape[1] != self.pos_embed.shape[1]:
-            pos_embed = self.pos_embed
-            cls_pos = pos_embed[:, 0:1, :]  # (1, 1, d_model)
-            patch_pos = pos_embed[:, 1:, :]  # (1, N, d_model)
+        #     H, W = self.grid_size
+        #     patch_pos = patch_pos.reshape(1, H, W, -1).permute(0, 3, 1, 2)  # (1, d_model, H, W)
 
-            H, W = self.grid_size
-            patch_pos = patch_pos.reshape(1, H, W, -1).permute(0, 3, 1, 2)  # (1, d_model, H, W)
+        #     new_H = x.shape[1] - 1
+        #     new_H = int(new_H ** 0.5)
+        #     patch_pos = torch.nn.functional.interpolate(
+        #         patch_pos, size=(new_H, new_H), mode='bicubic', align_corners=False
+        #     )
+        #     patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, -1, self.d_model)
 
-            new_H = x.shape[1] - 1
-            new_H = int(new_H ** 0.5)
-            patch_pos = torch.nn.functional.interpolate(
-                patch_pos, size=(new_H, new_H), mode='bicubic', align_corners=False
-            )
-            patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, -1, self.d_model)
-
-            pos_embed = torch.cat([cls_pos, patch_pos], dim=1)
-        else:
-            pos_embed = self.pos_embed
+        #     pos_embed = torch.cat([cls_pos, patch_pos], dim=1)
+        # else:
+        #     pos_embed = self.pos_embed
+        
+        pos_embed = self.pos_embed
 
         x = x + pos_embed
         return x
@@ -96,8 +121,7 @@ class ViT(nn.Module):
         
         self.blocks = nn.ModuleList([
             TransformerBlock(d_model, num_heads, d_ff, dropout)
-            for _ in range(num_layers)
-        ])
+            for _ in range(num_layers)])
         
         self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, num_classes)
@@ -111,13 +135,10 @@ class ViT(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        print(x.shape)
         x = self.patch_embed(x)
-        # print(x.shape)
         for block in self.blocks:
             x = block(x)
         x = self.norm(x)
-        print(self.head(x[:, 0]).shape)
         return self.head(x[:, 0])  # CLS token
 
 def create_model(**kwargs):

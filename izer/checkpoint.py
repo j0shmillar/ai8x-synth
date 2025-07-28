@@ -81,6 +81,8 @@ def load(
     output_channels = []
     input_channels = []
     cls_token = np.array([])
+    pos_embed = np.array([])
+    
     param_count = 0
     param_size = 0
     error_exit = False
@@ -91,8 +93,11 @@ def load(
         
         print(f"Loading {k}...")
 
-        if 'cls_token' in k:
+        if 'cls_token' in k: # TODO - shouldn't rely on op name
             cls_token = checkpoint_state[k].numpy().astype(np.int64)
+
+        if 'pos_embed' in k:
+            pos_embed = checkpoint_state[k].numpy().astype(np.int64)
 
         while seq < len(operator) and (operator[seq] == op.NONE or bypass[seq] or weight_source[seq] is not None):
             seq += 1
@@ -105,12 +110,11 @@ def load(
             continue
         
         ############################################################################
-        # TODO; support pos_embed?
+        # TODO - clean
 
         attn = 0
-        if 'weight' in parameter:
+        if 'weight' in parameter and not 'weight_bits' in parameter:
             if 'attn' in k:
-                print('attn_layer')
                 attn = 1
                 attn_cnt = attn_cnt + 1           
                        
@@ -126,15 +130,15 @@ def load(
             else:
                 w = checkpoint_state[k].numpy().astype(np.int64)
 
-            # TODO; pull out into func
+            # TODO - move out into func?
             if attn and attn_cnt == 1:
-                bias_name = '.'.join([layer, this_op, 'in_proj_bias']) # TODO fix; softcode
+                bias_name = '.'.join([layer, this_op, 'in_proj_bias']) # TODO - do not hardcode
                 wb_name = '.'.join([layer, 'weight_bits'])
                 wb = checkpoint_state[wb_name].numpy().astype(np.int64) if wb_name in checkpoint_state else 8 
                 if bias_name in checkpoint_state and seq not in no_bias:
                     if wb == 0:
                         wb = 8
-                    b = np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()).astype(np.int64)                
+                    b = np.floor((checkpoint_state[bias_name] / 2**(wb - 1)).numpy()).astype(np.int64)            
                 continue
 
             print("########################")
@@ -152,9 +156,13 @@ def load(
                            f'`{layer}.{this_op}.{parameter}` with dimensions {w.shape}. '
                            'Ensure the BatchNorm layers have been folded.',
                            error=not state.ignore_bn)
+                elif (this_op is not None and 'norm' in this_op) or 'norm' in layer:
+                    print('Norm') # TODO - clean
+                else:
+                    layer_str = f"{layer}.{this_op}.{parameter}" if this_op else f"{layer}.{parameter}"
+                    eprint(f'The checkpoint file contains 1-dimensional weights for `{layer_str}` with dimensions {w.shape}.')
                     continue
-                eprint('The checkpoint file contains 1-dimensional weights for '
-                       f'`{layer}.{this_op}.{parameter}` with dimensions {w.shape}.')
+
 
             wb_name = '.'.join([layer, 'weight_bits'])
             wb = checkpoint_state[wb_name].numpy().astype(np.int64) \
@@ -191,19 +199,24 @@ def load(
                 w = np.flip(w, axis=(2, 3)).swapaxes(0, 1)
 
             mult = conv_groups[seq] if operator[seq] != op.CONVTRANSPOSE2D else 1
-            input_channels.append(w.shape[1] * mult)  # Input channels
-            mult = conv_groups[seq] if operator[seq] == op.CONVTRANSPOSE2D else 1
 
-            ############################################################################
-
-            if attn:
-                output_channels.append(64) # TODO fix; softcode
+            ############################################################################     
+            # input_channels.append(w.shape[1] * mult) 
+            if w.ndim == 1:
+                in_ch = w.shape[0]
+                input_channels.append(in_ch)
+                output_channels.append(in_ch)
+                w = w.reshape(w.shape[0], 1, 1) 
+            elif operator[seq] == op.MHSA:
+                input_channels.append(w.shape[1] * mult)
+                output_channels.append(w.shape[1] * mult)
             else:
-                output_channels.append(w.shape[0] * mult) 
-
-            # output_channels.append(w.shape[0] * mult) 
+                input_channels.append(w.shape[1] * mult)
+                output_channels.append(w.shape[0] * mult)
 
             ############################################################################
+
+            mult = conv_groups[seq] if operator[seq] == op.CONVTRANSPOSE2D else 1
 
             if w.ndim == 2:  # MLP
                 if kernel_size[seq][0] != 1 or kernel_size[seq][1] != 1:
@@ -231,10 +244,15 @@ def load(
             weight_size.append(w_size)
             param_size += w_size
 
-            if w.ndim == 2:  # linear - add dummy 'channel'
-                w = np.expand_dims(w, axis=0)
-            else:  # conv1d, conv2d, ... - combine input and output channels
-                w = np.reshape(w, (-1, ) + w.shape[2:])
+            if operator[seq] == op.MHSA:
+                # convert (256, 64) to (256, 64, 1, 1) so it looks like a 1×1 2D kernel
+                if w.ndim == 2:
+                    w = np.expand_dims(w, axis=[2, 3])
+            else:
+                if w.ndim == 2:  # linear
+                    w = np.expand_dims(w, axis=0)
+                else:  # conv1d, conv2d, etc.
+                    w = np.reshape(w, (-1, ) + w.shape[2:])
 
             weights.append(w)
             weight_keys.append(k)
@@ -244,8 +262,6 @@ def load(
                 else '.'.join([layer, this_op, 'bias'])
 
             if bias_name in checkpoint_state and seq not in no_bias:
-
-                print(bias_name)
 
                 if wb == 0:  # In case the weights are all zero
                     wb = 8
@@ -342,4 +358,4 @@ def load(
     if error_exit:
         sys.exit(1)
 
-    return layers, weights, bias, output_shift, input_channels, output_channels, final_scale, cls_token
+    return layers, weights, bias, output_shift, input_channels, output_channels, final_scale, cls_token, pos_embed

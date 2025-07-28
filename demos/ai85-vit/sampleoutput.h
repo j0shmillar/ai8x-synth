@@ -1,6 +1,2 @@
 // This file was @generated automatically
 
-#define SAMPLE_OUTPUT { \
-  0x0000005c, 0x000000fa, 0x00000044, 0x00000080, 0x0000007f, 0x0000007f, 0x0000007f, 0x00000080, \
-  0x00000080, 0x00000080, \
-}

@@ -24,7 +24,7 @@ batch_size = 64
 learning_rate = 1e-3
 weight_decay = 1e-4
 num_epochs = 1
-checkpoint_file = 'trained/ai85-vit-patch_size_1.pth.tar'
+checkpoint_file = 'trained/ai85-vit-patch_size_1_pos_embed.pth.tar'
 num_workers = 2
 pin_memory = True
 
@@ -110,22 +110,10 @@ def main():
     # else:
     #     raise FileNotFoundError(f"Checkpoint file not found at {checkpoint_file}")
 
-    print("\n[INFO] Input dimensions for each relevant named layer:")
-    for name, module in model.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.Conv1d)):
-            print(f"{name}: in_channels = {module.in_channels}")
-        elif isinstance(module, nn.Linear):
-            print(f"{name}: in_features = {module.in_features}")
-        elif isinstance(module, nn.MultiheadAttention):
-            print(f"{name}: embed_dim (input size) = {module.embed_dim}, num_heads = {module.num_heads}")
-        elif isinstance(module, nn.LayerNorm):
-            print(f"{name}: normalized_shape = {module.normalized_shape}")
-
     transform = transforms.Compose([
         transforms.Resize(input_size),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
-    ])
+        transforms.Normalize(mean, std)])
 
     train_dataset = datasets.MNIST('data', train=True, download=True, transform=transform)
     val_dataset = datasets.MNIST('data', train=False, transform=transform)
@@ -152,7 +140,7 @@ def main():
     for name, param in model.named_parameters():
         if param.requires_grad and param.grad is not None:
             if torch.all(param.grad.detach() == 0):
-                print(f"[WARNING] {name} has zero gradient!")
+                print(f"{name} has zero gradient!")
 
     for epoch in range(num_epochs):
         print(f'\nEpoch {epoch + 1}/{num_epochs}')
@@ -160,13 +148,13 @@ def main():
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         scheduler.step()
 
-        # if val_acc > best_acc:
-        #     best_acc = val_acc
-        # torch.save({
-        #     'epoch': epoch + 1,
-        #     'state_dict': model.state_dict(),
-        #     'arch': 'ai85_vit',
-        # }, checkpoint_file)
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'arch': 'ai85_vit',
+            }, checkpoint_file)
 
         print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
@@ -174,21 +162,7 @@ def main():
 
     for name, param in model.named_parameters():
         if torch.all(param == 0):
-            print(f"[WARNING] {name} weights are all zeros!")
-
-    # dummy_input = torch.randn(1, input_channels, *input_size).to(device)
-    # torch.onnx.export(
-    #     model, dummy_input, "vit.onnx",
-    #     input_names=["input"], output_names=["output"],
-    #     dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
-    #     opset_version=11)
-    # print("[INFO] Model exported to vit.onnx")
-
-    # model = onnx.load("vit.onnx")
-    # model, check = onnxsim.simplify(model)
-    # onnx.save(model, "vit.onnx")
-    # assert check, "Simplified ONNX model could not be validated"
-    # print("[INFO] Model exported to vit_sim.onnx")
+            print(f"{name} has all zero weights!")
 
 if __name__ == '__main__':
     main()

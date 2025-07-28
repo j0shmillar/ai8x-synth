@@ -23,23 +23,23 @@ typedef int16_t q15_t;
 
 /*
   SUMMARY OF OPS
-  Hardware: 53,678,464 ops (53,494,784 macc; 137,024 comp; 46,656 add; 0 mul; 0 bitwise)
+  Hardware: 51,096,448 ops (50,912,768 macc; 137,024 comp; 46,656 add; 0 mul; 0 bitwise)
             True MACs: 0
     Layer 0 (patch_embed.conv.0): 501,760 ops (451,584 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
     Layer 1 (patch_embed.conv.1): 28,951,552 ops (28,901,376 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
     Layer 2 (patch_embed.conv.2): 3,037,824 ops (2,985,984 macc; 5,184 comp; 46,656 add; 0 mul; 0 bitwise)
     Layer 3 (blocks.0.norm1): 331,776 ops (331,776 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
-    Layer 4 (blocks.0.attn): 3,547,648 ops (3,547,648 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
+    Layer 4 (blocks.0.attn): 2,686,976 ops (2,686,976 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 5 (blocks.0.norm2): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 6 (blocks.0.ff.0): 1,353,984 ops (1,343,488 macc; 10,496 comp; 0 add; 0 mul; 0 bitwise)
     Layer 7 (blocks.0.ff.3): 1,343,488 ops (1,343,488 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 8 (blocks.1.norm1): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
-    Layer 9 (blocks.1.attn): 3,547,648 ops (3,547,648 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
+    Layer 9 (blocks.1.attn): 2,686,976 ops (2,686,976 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 10 (blocks.1.norm2): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 11 (blocks.1.ff.0): 1,353,984 ops (1,343,488 macc; 10,496 comp; 0 add; 0 mul; 0 bitwise)
     Layer 12 (blocks.1.ff.3): 1,343,488 ops (1,343,488 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 13 (blocks.2.norm1): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
-    Layer 14 (blocks.2.attn): 3,547,648 ops (3,547,648 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
+    Layer 14 (blocks.2.attn): 2,686,976 ops (2,686,976 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 15 (blocks.2.norm2): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 16 (blocks.2.ff.0): 1,353,984 ops (1,343,488 macc; 10,496 comp; 0 add; 0 mul; 0 bitwise)
     Layer 17 (blocks.2.ff.3): 1,343,488 ops (1,343,488 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
@@ -47,8 +47,8 @@ typedef int16_t q15_t;
     Layer 19 (head): 104,960 ops (104,960 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
 
   RESOURCE USAGE
-  Weight memory: 173,696 bytes out of 442,368 bytes total (39.3%)
-  Bias memory:   1,418 bytes out of 2,048 bytes total (69.2%)
+  Weight memory: 173,312 bytes out of 442,368 bytes total (39.2%)
+  Bias memory:   970 bytes out of 2,048 bytes total (47.4%)
 */
 
 /* Number of outputs for this network */

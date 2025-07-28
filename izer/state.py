@@ -217,5 +217,6 @@ zero_sram: bool = False
 zero_unused: bool = False
 
 cls_token: int = 0
+pos_embed: int = 0
 seq_length: List[int] = []
 d_model: List[int] = []

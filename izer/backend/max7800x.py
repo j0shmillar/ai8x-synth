@@ -160,6 +160,7 @@ class Backend(backend.Backend):
         zero_unused = state.zero_unused
 
         cls_token = state.cls_token
+        pos_embed = state.pos_embed
         seq_length = state.seq_length
         d_model = state.d_model
 
@@ -3045,7 +3046,6 @@ class Backend(backend.Backend):
                         np.save(datafile, np.empty((0)), allow_pickle=False, fix_imports=False)
                 
                 ############################################################################
-                # TODO; check
 
                 if not data.ndim == 3:
                     if operator[ll] == op.CONV1D:
@@ -3072,8 +3072,6 @@ class Backend(backend.Backend):
                     # else:
                     #    np.save(datafile, np.empty((0)), allow_pickle=False, fix_imports=False)
 
-                # Convolution or passthrough
-                # if operator[ll] in [op.CONV2D, op.LINEAR]:
                 if operator[ll] == op.CONV2D:
                     if flatten[ll]:
                         in_chan *= pooled_dim[ll][0] * pooled_dim[ll][1]
@@ -3121,8 +3119,7 @@ class Backend(backend.Backend):
                         datafile=datafile,
                     )
 
-###################################################################################################
-# TODO; check
+                ############################################################################
 
                 elif operator[ll] == op.LINEAR:
                     if flatten[ll]:
@@ -3147,8 +3144,9 @@ class Backend(backend.Backend):
 
                     out_buf = np.stack(out_list, axis=1) 
                     out_size = out_buf.shape
+                
+                ############################################################################
 
-###################################################################################################
                 elif operator[ll] == op.CONVTRANSPOSE2D:
                     if not bypass[ll]:
                         k = kernel[kernel_ptrs[ll]].reshape(
@@ -3231,6 +3229,7 @@ class Backend(backend.Backend):
                         data,
                         output_width=output_width[ll],
                         cls_token = cls_token, 
+                        pos_embed= pos_embed,
                         d_model = d_model[ll], 
                         seq_length=seq_length[ll], 
                     )
@@ -3302,17 +3301,13 @@ class Backend(backend.Backend):
                     np.save(datafile, out_buf, allow_pickle=False, fix_imports=False)
 
                 ############################################################################
-                # TODO; check
 
                 if buffer_shift[ll] is None:
                     if len(out_size) == 2:
-                        assert out_size[0] == output_chan[ll] \
-                            and out_size[1] == (output_dim[ll][0]*output_dim[ll][1]) + 1
+                        assert out_size[0] == output_chan[ll] and out_size[1] == (output_dim[ll][0]*output_dim[ll][1]) + 1
                     elif len(out_size) == 3:
-                        assert out_size[0] == output_chan[ll] \
-                            and out_size[1] == output_dim[ll][0] and out_size[2] == output_dim[ll][1]
-                        assert out_size[0] == output_size[ll][0] \
-                            and out_size[1] == output_size[ll][1] and out_size[2] == output_size[ll][2]
+                        assert out_size[0] == output_chan[ll] and out_size[1] == output_dim[ll][0] and out_size[2] == output_dim[ll][1]
+                        assert out_size[0] == output_size[ll][0] and out_size[1] == output_size[ll][1] and out_size[2] == output_size[ll][2]
                 else:
                     assert out_size[1] == output_chan[ll] \
                         and out_size[0] - buffer_shift[ll] == output_dim[ll][0] \
@@ -3654,7 +3649,7 @@ class Backend(backend.Backend):
                         output_count += output_chan[i] * output_dim[i][0] * output_dim[i][1]
             insert = summary_stats + \
                 '\n/* Number of outputs for this network */\n' \
-                f'#define CNN_NUM_OUTPUTS {output_count}' # TODO - why does output_count = 810?
+                f'#define CNN_NUM_OUTPUTS {output_count}' # TODO - why does count = 810?
             if timer is not None:
                 insert += '\n\n/* Use this timer to time the inference */\n' \
                           f'#define CNN_INFERENCE_TIMER MXC_TMR{timer}'
