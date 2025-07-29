@@ -24,7 +24,6 @@ typedef int16_t q15_t;
 /*
   SUMMARY OF OPS
   Hardware: 53,574,784 ops (53,391,104 macc; 137,024 comp; 46,656 add; 0 mul; 0 bitwise)
-            True MACs: 0
     Layer 0 (patch_embed.conv.0): 501,760 ops (451,584 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
     Layer 1 (patch_embed.conv.1): 28,951,552 ops (28,901,376 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
     Layer 2 (patch_embed.conv.2): 3,037,824 ops (2,985,984 macc; 5,184 comp; 46,656 add; 0 mul; 0 bitwise)
