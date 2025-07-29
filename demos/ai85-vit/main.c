@@ -109,7 +109,7 @@ int main(void)
 
 /*
   SUMMARY OF OPS
-  Hardware: 53,678,464 ops (53,494,784 macc; 137,024 comp; 46,656 add; 0 mul; 0 bitwise)
+  Hardware: 53,574,784 ops (53,391,104 macc; 137,024 comp; 46,656 add; 0 mul; 0 bitwise)
             True MACs: 0
     Layer 0 (patch_embed.conv.0): 501,760 ops (451,584 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
     Layer 1 (patch_embed.conv.1): 28,951,552 ops (28,901,376 macc; 50,176 comp; 0 add; 0 mul; 0 bitwise)
@@ -130,7 +130,7 @@ int main(void)
     Layer 16 (blocks.2.ff.0): 1,353,984 ops (1,343,488 macc; 10,496 comp; 0 add; 0 mul; 0 bitwise)
     Layer 17 (blocks.2.ff.3): 1,343,488 ops (1,343,488 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
     Layer 18 (norm): 335,872 ops (335,872 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
-    Layer 19 (head): 104,960 ops (104,960 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
+    Layer 19 (head): 1,280 ops (1,280 macc; 0 comp; 0 add; 0 mul; 0 bitwise)
 
   RESOURCE USAGE
   Weight memory: 173,696 bytes out of 442,368 bytes total (39.3%)

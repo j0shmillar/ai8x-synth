@@ -1,0 +1,23 @@
+Open On-Chip Debugger 0.10.0+dev-gb84d97ec4-dirty (2025-02-26-17:30)
+Licensed under GNU GPL v2
+For bug reports, read
+	http://openocd.org/doc/doxygen/bugs.html
+User : 13 1 options.c:63 configuration_output_handler(): debug_level: 3
+User : 14 1 options.c:63 configuration_output_handler(): 
+Debug: 15 1 configuration.c:42 add_script_search_dir(): adding /Users/joshmillar/MaximSDK/Tools/OpenOCD/scripts
+Debug: 16 1 options.c:187 add_default_dirs(): bindir=/usr/local/bin
+Debug: 17 1 options.c:188 add_default_dirs(): pkgdatadir=/usr/local/share/openocd
+Debug: 18 1 options.c:189 add_default_dirs(): exepath=/usr/local/bin
+Debug: 19 1 options.c:190 add_default_dirs(): bin2data=../share/openocd
+Debug: 20 1 configuration.c:42 add_script_search_dir(): adding /Users/joshmillar/.openocd
+Debug: 21 1 configuration.c:42 add_script_search_dir(): adding /usr/local/bin/../share/openocd/site
+Debug: 22 1 configuration.c:42 add_script_search_dir(): adding /usr/local/bin/../share/openocd/scripts
+Debug: 23 2 configuration.c:97 find_file(): found /usr/local/bin/../share/openocd/scripts/interface/cmsis-dap.cfg
+Debug: 24 2 command.c:146 script_debug(): command - adapter driver cmsis-dap
+Debug: 26 2 command.c:352 register_command_handler(): registering 'cmsis-dap'...
+Debug: 27 2 command.c:352 register_command_handler(): registering 'cmsis-dap'...
+Debug: 28 2 command.c:352 register_command_handler(): registering 'cmsis_dap_vid_pid'...
+Debug: 29 2 command.c:352 register_command_handler(): registering 'cmsis_dap_serial'...
+User : 30 2 command.c:692 command_run_line(): embedded:startup.tcl:26: Error: Can't find target/max32690.cfg
+in procedure 'script' 
+at file "embedded:startup.tcl", line 26

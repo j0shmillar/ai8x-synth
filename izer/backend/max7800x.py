@@ -3118,6 +3118,7 @@ class Backend(backend.Backend):
                         bypass=bypass[ll],
                         datafile=datafile,
                     )
+                    # print(f"CONV2D OUT SIZE {out_size}")
 
                 ############################################################################
 
@@ -3131,8 +3132,9 @@ class Backend(backend.Backend):
                         in_chan
                     )
                     out_list = []
-                    for i in range(data.shape[1]): 
-                        token = data[:, i]  
+                    if ll == final_layer:
+                        # Only run linear once on CLS token
+                        token = data[:, 0]  # shape (64,)
                         out_token, _ = linear_layer(
                             ll,
                             activation[ll],
@@ -3140,10 +3142,21 @@ class Backend(backend.Backend):
                             bias[bias_ptrs[ll]],
                             token
                         )
-                        out_list.append(out_token)
-
-                    out_buf = np.stack(out_list, axis=1) 
+                        out_buf = out_token  # shape (10,)
+                    else:
+                        for i in range(data.shape[1]):
+                            token = data[:, i]
+                            out_token, _ = linear_layer(
+                                ll,
+                                activation[ll],
+                                k,
+                                bias[bias_ptrs[ll]],
+                                token
+                            )
+                            out_list.append(out_token)
+                        out_buf = np.stack(out_list, axis=1)
                     out_size = out_buf.shape
+                    print(f"LINEAR OUT SIZE {out_size}")
                 
                 ############################################################################
 
@@ -3233,6 +3246,7 @@ class Backend(backend.Backend):
                         d_model = d_model[ll], 
                         seq_length=seq_length[ll], 
                     )
+                    # print(f"MHSA OUT SIZE {out_size}")
                 elif operator[ll] == op.LAYER_NORM:
                     out_buf, out_size = layernorm_layer(
                         ll,
@@ -3244,6 +3258,7 @@ class Backend(backend.Backend):
                         output_width=output_width[ll],
                         n_channels_out=output_chan[ll]
                     )
+                    # print(f"LAYERNORM OUT SIZE {out_size}")
                 # elif operator[ll] == op.PATCH_EMBED:
                 #     out_buf, out_size = patch_embed_layer(
                 #         ll,
@@ -3636,7 +3651,9 @@ class Backend(backend.Backend):
             output_count = 0
             for i in range(terminating_layer + 1):
                 if output_layer[i]:
-                    if output_width[i] != 32:
+                    if i == terminating_layer:
+                        output_count = output_chan[terminating_layer]
+                    elif output_width[i] != 32:
                         if scale_output:
                             output_count += (output_chan[i] * output_dim[i][0] * output_dim[i][1]
                                              + (32 // (2 * output_width[i]) - 1)) \

@@ -539,10 +539,13 @@ def main():
                 eprint(f'{layer_pfx(ll)}{op.string(operator[ll])} does not support stride '
                        f'other than 1 (currently set to {stride[ll][0]}x{stride[ll][1]}).')
             if operator[ll] in [op.NONE, op.CONV2D, op.LINEAR]:
-                output_dim[ll] = [(pooled_size[0] - dilation[ll][0] * (kernel_size[ll][0] - 1)
-                                   - 1 + 2 * padding[ll][0]) // stride[ll][0] + 1,
-                                  (pooled_size[1] - dilation[ll][1] * (kernel_size[ll][1] - 1)
-                                   - 1 + 2 * padding[ll][1]) // stride[ll][1] + 1]
+                if ll == final_layer and operator[ll] == op.LINEAR: # TODO - correct?
+                    output_dim[ll] = [1, 1]
+                else:
+                    output_dim[ll] = [(pooled_size[0] - dilation[ll][0] * (kernel_size[ll][0] - 1)
+                                    - 1 + 2 * padding[ll][0]) // stride[ll][0] + 1,
+                                    (pooled_size[1] - dilation[ll][1] * (kernel_size[ll][1] - 1)
+                                    - 1 + 2 * padding[ll][1]) // stride[ll][1] + 1]
             elif operator[ll] == op.CONVTRANSPOSE2D:
                 output_dim[ll] = [(pooled_size[0] - 1) * stride[ll][0] - 2 * padding[ll][0]
                                   + dilation[ll][0] * (kernel_size[ll][0] - 1)

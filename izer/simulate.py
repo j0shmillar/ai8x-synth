@@ -520,10 +520,7 @@ def linear_layer(
         in_features * out_features
     )
 
-    if state.verbose and verbose_data:
-        print(f"LINEAR OUTPUT (size {out_features}):")
-        print(output)
-        print('')
+    print(f"LINEAR INPUT size {in_features} OUTPUT size {out_features}:")
 
     return output, out_features
 

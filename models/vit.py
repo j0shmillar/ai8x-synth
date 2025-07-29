@@ -2,25 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# def resize_pos_embed(self, x):
-#     if x.shape[1] != self.pos_embed.shape[1]:
-#         pos_embed = self.pos_embed
-#         cls_pos = pos_embed[:, 0:1, :]
-#         patch_pos = pos_embed[:, 1:, :]
-
-#         H, W = self.grid_size
-#         patch_pos = patch_pos.reshape(1, H, W, -1).permute(0, 3, 1, 2)
-
-#         new_H = int((x.shape[1] - 1) ** 0.5)
-#         patch_pos = F.interpolate(patch_pos, size=(new_H, new_H), mode='bicubic', align_corners=False)
-
-#         patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, -1, self.d_model)
-#         pos_embed = torch.cat([cls_pos, patch_pos], dim=1)
-#     else:
-#         pos_embed = self.pos_embed
-#     return pos_embed
-
-
 class PatchEmbedding(nn.Module):
     def __init__(self, img_size, patch_size, in_channels, d_model):
         super().__init__()
@@ -52,12 +33,15 @@ class PatchEmbedding(nn.Module):
         B = x.shape[0]
         # x = self.proj(x)  # (B, d_model, H', W')
         x = self.conv1(x)
+        print(x.shape)
         x = self.relu(x)
         x = self.conv2(x)
         x = self.relu(x)
+        print(x.shape)
         x = self.conv3(x)
         x = self.relu(x)
         x = self.pool(x)
+        print(x.shape)
 
         x = x.flatten(2).transpose(1, 2)  # (B, n_patches, d_model)
 
@@ -103,8 +87,11 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
+        print(x.shape)
         x = self.norm2(x)
+        print(x.shape)
         x = x + self.ff(x)
+        print(f"{x.shape} - this is a sequential. intermediary shapes = 128 and back to 64") 
         return x
 
 class ViT(nn.Module):
@@ -139,7 +126,132 @@ class ViT(nn.Module):
         for block in self.blocks:
             x = block(x)
         x = self.norm(x)
-        return self.head(x[:, 0])  # CLS token
+        print(x.shape)
+        # out = self.head(x[:, 0])
+        # return out
+        x = x[:, 0, :]  # ensure last dimension only
+        x = x.reshape(x.shape[0], -1)  # remove sequence dim explicitly
+        out = self.head(x)
+        print(out.shape)
+        return out
 
 def create_model(**kwargs):
     return ViT(**kwargs)
+
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+
+# class PatchEmbedding(nn.Module):
+#     def __init__(self, img_size, patch_size, in_channels, d_model):
+#         super().__init__()
+#         self.img_size = img_size
+#         self.patch_size = patch_size
+#         self.in_channels = in_channels
+#         self.d_model = d_model
+        
+#         # Conv-based patch extraction (OK for MAX78000)
+#         self.conv1 = nn.Conv2d(in_channels, d_model, kernel_size=3, stride=1, padding=1)
+#         self.conv2 = nn.Conv2d(d_model, d_model, kernel_size=3, stride=1, padding=1)
+#         self.conv3 = nn.Conv2d(d_model, d_model, kernel_size=3, stride=patch_size, padding=1)
+#         self.pool = nn.AvgPool2d(kernel_size=3, stride=3)
+#         self.relu = nn.ReLU()
+
+#         # Determine number of patches after pooling
+#         H, W = img_size
+#         grid_H = H // (patch_size * 3)
+#         grid_W = W // (patch_size * 3)
+#         self.grid_size = (grid_H, grid_W)
+#         num_patches = grid_H * grid_W
+
+#         # Precomputed positional embedding (NO resizing at runtime)
+#         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+#         self.pos_embed = nn.Parameter(torch.randn(1, 1 + num_patches, d_model) * 0.02)
+
+#     def forward(self, x):
+#         B = x.shape[0]
+
+#         # Patch embedding
+#         x = self.relu(self.conv1(x))
+#         x = self.relu(self.conv2(x))
+#         x = self.relu(self.conv3(x))
+#         x = self.pool(x)
+
+#         # Flatten patches
+#         B, C, H, W = x.shape
+#         x = x.view(B, C, H * W).transpose(1, 2)  # (B, n_patches, d_model)
+
+#         # Add CLS token
+#         cls_token = self.cls_token.expand(B, -1, -1)  # (B, 1, d_model)
+#         x = torch.cat([cls_token, x], dim=1)  # (B, 1 + n_patches, d_model)
+
+#         # Add fixed positional embedding
+#         x = x + self.pos_embed
+#         return x
+
+
+# class TransformerBlock(nn.Module):
+#     def __init__(self, d_model, num_heads, d_ff, dropout):
+#         super().__init__()
+#         self.norm1 = nn.LayerNorm(d_model)
+#         self.attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout, batch_first=True)
+#         self.norm2 = nn.LayerNorm(d_model)
+#         self.ff = nn.Sequential(
+#             nn.Linear(d_model, d_ff),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(d_ff, d_model),
+#             nn.Dropout(dropout)
+#         )
+
+#     def forward(self, x):
+#         # Self-attention
+#         attn_out, _ = self.attn(self.norm1(x), self.norm1(x), self.norm1(x))
+#         x = x + attn_out
+#         # Feed-forward
+#         x = x + self.ff(self.norm2(x))
+#         return x
+
+
+# class ViT(nn.Module):
+#     def __init__(self, img_size=(28, 28), patch_size=1, in_channels=1, num_classes=10,
+#                  d_model=64, num_heads=4, num_layers=4, d_ff=128, dropout=0.1):
+#         super().__init__()
+        
+#         self.patch_embed = PatchEmbedding(
+#             img_size=img_size,
+#             patch_size=patch_size,
+#             in_channels=in_channels,
+#             d_model=d_model
+#         )
+        
+#         self.blocks = nn.ModuleList([
+#             TransformerBlock(d_model, num_heads, d_ff, dropout)
+#             for _ in range(num_layers)
+#         ])
+        
+#         self.norm = nn.LayerNorm(d_model)
+#         self.head = nn.Linear(d_model, num_classes)
+        
+#         self.apply(self._init_weights)
+
+#     def _init_weights(self, m):
+#         if isinstance(m, nn.Linear):
+#             nn.init.trunc_normal_(m.weight, std=0.02)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+
+#     def forward(self, x):
+#         x = self.patch_embed(x)
+#         for block in self.blocks:
+#             x = block(x)
+#         x = self.norm(x)
+
+#         # Class token only
+#         cls_token = x[:, 0, :]  # safe for MAX78000
+#         return self.head(cls_token)
+
+
+# def create_model(**kwargs):
+#     return ViT(**kwargs)
+
