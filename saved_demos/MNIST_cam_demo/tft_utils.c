@@ -29,28 +29,10 @@
 #include "uart.h"
 #include "tft_utils.h"
 #include "example_config.h"
-#ifdef BOARD_EVKIT_V1
-#include "bitmap.h"
-#include "tft_ssd2119.h"
-#endif
-#ifdef BOARD_FTHR_REVA
 #include "tft_ili9341.h"
-#endif
 
 #ifdef TFT_ENABLE
-#ifdef BOARD_EVKIT_V1
-static int font = urw_gothic_12_grey_bg_white;
-#endif
-#ifdef BOARD_FTHR_REVA
 static int font = (int)&Liberation_Sans16x16[0];
-#endif
-
-static text_t label_text[] = {
-    // info
-    { (char *)"One", 3 },  { (char *)"Two", 3 },  { (char *)"Three", 5 }, { (char *)"Four", 4 },
-    { (char *)"Five", 4 }, { (char *)"Six", 3 },  { (char *)"Seven", 5 }, { (char *)"Eight", 5 },
-    { (char *)"Nine", 4 }, { (char *)"Zero", 4 },
-};
 #endif
 
 void TFT_Print(char *str, int x, int y, int font, int length)

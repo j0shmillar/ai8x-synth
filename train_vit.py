@@ -20,7 +20,7 @@ d_ff = 128
 dropout = 0.1
 num_classes = 10
 
-batch_size = 64
+batch_size = 1
 learning_rate = 1e-3
 weight_decay = 1e-4
 num_epochs = 1
@@ -123,9 +123,10 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, pin_memory=pin_memory)
 
-    # for data, _ in train_loader:
+    # for data, out in train_loader:
     #     image = np.clip(data.cpu().detach().numpy() * 127, -128, 127).astype(np.int8)  # for q7_t
     #     header_str = to_c_header(image)
+    #     print(out)
     #     with open("sample_input.h", "w") as f:
     #         f.write(header_str)
     #     break

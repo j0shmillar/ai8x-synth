@@ -1,3 +1,23 @@
+/******************************************************************************
+ *
+ * Copyright (C) 2022-2023 Maxim Integrated Products, Inc. (now owned by 
+ * Analog Devices, Inc.),
+ * Copyright (C) 2023-2024 Analog Devices, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ******************************************************************************/
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -15,219 +35,250 @@
 #include "weights.h"
 #include "mxc_delay.h"
 #include "camera.h"
-#include "spi.h"
-#include "mxc.h"
-#include "mxc_device.h"
-#include "board.h"
-#include "rtc.h"
-#include "uart.h"
-#include "tft_utils.h"
-#include "softmax.h"
-
-#define TFT_X_OFFSET 50
-
-#define IMAGE_SIZE_X 74
-#define IMAGE_SIZE_Y 74
-#define IMAGE_SCALE 3
-#define CAMERA_SIZE_X (IMAGE_SCALE * IMAGE_SIZE_X)
-#define CAMERA_SIZE_Y (IMAGE_SCALE * IMAGE_SIZE_Y)
-
-// TODO - rm?
-#ifdef BOARD_EVKIT_V1
-#include "bitmap.h"
-#include "tft_ssd2119.h"
-#endif
-#ifdef BOARD_FTHR_REVA
-#include "tft_ili9341.h"
-#endif
+#include "softmax.h"  
 #include "example_config.h"
+#include "tft_utils.h"
+#include "tft_ili9341.h"
 
-#ifdef BOARD_EVKIT_V1 // TODO - rm?
-int font = urw_gothic_12_grey_bg_white;
-#endif
-#ifdef BOARD_FTHR_REVA
-int font = (int)&Liberation_Sans16x16[0];
-#endif
+#define USE_CAMERA_INPUT 0
+#include "sample_data.h" 
+
+#define CAMERA_TO_LCD (1)
+#define IMAGE_SIZE_X (64)
+#define IMAGE_SIZE_Y (64)
+#define CAMERA_FREQ (10 * 1000 * 1000)
+
+#define TFT_BUFF_SIZE 35 
+
+// === MNIST ===
+#define CNN_NUM_OUTPUTS 10      
+#define MNIST_W 28
+#define MNIST_H 28
+
+const char classes[CNN_NUM_OUTPUTS][10] = { "0","1","2","3","4","5","6","7","8","9" };
+char buff[TFT_BUFF_SIZE];
+
 volatile uint32_t cnn_time; // Stopwatch
+uint32_t input_0_camera[1024];
+uint32_t input_1_camera[1024];
+uint32_t input_2_camera[1024];
 
-#if defined(RGB565) && defined(BOARD_EVKIT_V1)
-uint8_t data565[CAMERA_SIZE_X * 2];
-#endif
+int font_1 = (int)&Liberation_Sans16x16[0];
+int font_2 = (int)&Liberation_Sans16x16[0];
 
-extern int g_dma_channel_tft;
 void fail(void)
 {
     printf("\n*** FAIL ***\n\n");
-
     while (1) {}
 }
 
+// ---- 0 = use sample bytes, 1 = use cam ----
+#define USE_CAMERA_INPUT 0
+
+static uint8_t in784[784]; 
+static const uint32_t input_0[] = SAMPLE_INPUT_0; // its a 7
+
+void load_input(void)
+{
+#if USE_CAMERA_INPUT == 0
+    memcpy32((uint32_t *)0x50400000, input_0, 196);
+#else
+    uint8_t *buf; uint32_t len, w, h;
+    camera_get_image(&buf, &len, &w, &h);  
+
+    const float sx = (float)w / 28.0f;
+    const float sy = (float)h / 28.0f;
+
+    for (uint32_t yo = 0; yo < 28; ++yo) {
+        uint32_t yi = (uint32_t)(yo * sy);
+        uint32_t row_off = yi * w * 4; // RGB888 (+pad) = 4 bytes/pixel
+        for (uint32_t xo = 0; xo < 28; ++xo) {
+            uint32_t xi = (uint32_t)(xo * sx);
+            uint32_t idx = row_off + xi * 4;
+
+            uint8_t r = buf[idx + 0];
+            uint8_t g = buf[idx + 1];
+            uint8_t b = buf[idx + 2];
+
+            // luma 0..255 (white-on-black)
+            uint8_t gray = (uint8_t)((77u * r + 150u * g + 29u * b) >> 8);
+
+            in784[yo * 28 + xo] = gray;
+        }
+    }
+
+    memcpy((uint32_t *) 0x50400000, in784, 784); // TODO should be 196
+#endif
+}
 static int32_t ml_data[CNN_NUM_OUTPUTS];
 static q15_t ml_softmax[CNN_NUM_OUTPUTS];
 
 void softmax_layer(void)
 {
-    printf("and here\n");
-    cnn_unload((uint32_t *)ml_data);
-    printf("and here...?\n");
-    // TODO - print shape (should be 10 & not 810)
-    softmax_q17p14_q15((const q31_t *)ml_data, CNN_NUM_OUTPUTS, ml_softmax);
+    cnn_unload((uint32_t *) ml_data);
+    softmax_q17p14_q15((const q31_t *) ml_data, CNN_NUM_OUTPUTS, ml_softmax);
 }
 
-#ifdef RGB565
-#define RESIZED_WIDTH 28
-#define RESIZED_HEIGHT 28
-
-void load_input_RGB565(void)
+/* **************************************************************************** */
+static uint8_t signed_to_unsigned(int8_t val)
 {
-    static stream_stat_t *stat;
-    uint8_t *buffer;
-    uint32_t imgLen, w, h;
-    uint32_t *cnn_mem = (uint32_t *)0x50402000;
-
-    union {
-        uint32_t w;
-        uint8_t b[4];
-    } m;
-
-    camera_start_capture_image();
-    camera_get_image(&buffer, &imgLen, &w, &h);
-
-    float scale_x = (float)w / RESIZED_WIDTH;
-    float scale_y = (float)h / RESIZED_HEIGHT;
-
-    for (uint32_t y_out = 0; y_out < RESIZED_HEIGHT; y_out++) {
-        uint32_t y_in = (uint32_t)(y_out * scale_y);
-        for (uint32_t x_out = 0; x_out < RESIZED_WIDTH; x_out++) {
-            uint32_t x_in = (uint32_t)(x_out * scale_x);
-
-            uint32_t index = (y_in * w + x_in) * 2;
-            uint8_t byte1 = buffer[index];
-            uint8_t byte2 = buffer[index + 1];
-
-            // RGB565 to 24-bit RGB
-            m.b[0] = byte1 & 0xF8;                            // R (5 bits)
-            m.b[1] = ((byte1 & 0x07) << 5) | ((byte2 & 0xE0) >> 3); // G (6 bits)
-            m.b[2] = (byte2 & 0x1F) << 3;                     // B (5 bits)
-
-            // pack and norm
-            *cnn_mem++ = m.w ^ 0x00808080U;
-        }
+    uint8_t value;
+    if (val < 0) {
+        value = ~val + 1;
+        return (128 - value);
     }
-
-    stat = get_camera_stream_statistic();
-    if (stat->overflow_count > 0) {
-        printf("OVERFLOW CNN = %d\n", stat->overflow_count);
-        LED_On(LED2); // red LED if overflow
-        while (1) {}
-    }
+    return val + 128;
 }
-#endif
 
-void display_camera_RGB565(void)
+/* **************************************************************************** */
+int8_t unsigned_to_signed(uint8_t val)
 {
-    static stream_stat_t *stat;
+    return val - 128;
+}
 
-    uint8_t *frame_buffer = NULL;
-    uint8_t *buffer;
-    uint32_t imgLen;
-    uint32_t w, h, y;
+/* **************************************************************************** */
+void lcd_show_sampledata(uint32_t *data0, uint32_t *data1, uint32_t *data2, int xcord, int ycord,
+                         int length)
+{
+    int i;
+    int j;
+    int x;
+    int y;
+    int r;
+    int g;
+    int b;
+    int scale = 1.2;
 
-    // display
-    camera_start_capture_image();
+    uint32_t color;
+    uint8_t *ptr0;
+    uint8_t *ptr1;
+    uint8_t *ptr2;
 
-    camera_get_image(&buffer, &imgLen, &w, &h);
-
-    printf("W:%d H:%d L:%d \n", w, h, imgLen);
-
-#ifdef BOARD_FTHR_REVA
-    // init FTHR TFT for DMA streaming
-    MXC_TFT_Stream(TFT_X_OFFSET, 0, w, h);
-#endif
-
-    for (y = 0; y < h; y++) {
-        while ((frame_buffer = get_camera_stream_buffer()) == NULL) {
-            if (camera_is_image_rcv()) {
-                break;
+    x = xcord;
+    y = ycord;
+    for (i = 0; i < length; i++) {
+        ptr0 = (uint8_t *)&data0[i];
+        ptr1 = (uint8_t *)&data1[i];
+        ptr2 = (uint8_t *)&data2[i];
+        for (j = 0; j < 4; j++) {
+            r = ptr0[j];
+            g = ptr1[j];
+            b = ptr2[j];
+            color = RGB(r, g, b); // convert to RGB565
+            MXC_TFT_WritePixel(x * scale, y * scale, scale, scale, color);
+            x += 1;
+            if (x >= (IMAGE_SIZE_X + xcord)) {
+                x = xcord;
+                y += 1;
+                if ((y + 6) >= (IMAGE_SIZE_Y + ycord))
+                    return;
             }
-        };
-
-#ifdef BOARD_EVKIT_V1
-        int j = 0;
-        for (int k = 2 * w - 1; k > 0; k -= 2) { // flip order to display
-
-            data565[j++] = frame_buffer[k + 1];
-            data565[j++] = frame_buffer[k];
         }
-
-        MXC_TFT_ShowImageCameraRGB565(TFT_X_OFFSET, y, data565, w, 1);
-#endif
-#ifdef BOARD_FTHR_REVA
-        tft_dma_display(TFT_X_OFFSET, y, w, 1, (uint32_t *)frame_buffer);
-#endif
-
-        release_camera_stream_buffer();
-    }
-
-    stat = get_camera_stream_statistic();
-    if (stat->overflow_count > 0) {
-        printf("OVERFLOW DISP = %d\n", stat->overflow_count);
-        LED_On(LED2); // red LED if overflow
-        while (1) {}
     }
 }
 
-void cnn_wait(void)
+/* **************************************************************************** */
+void process_camera_img(uint32_t *data0, uint32_t *data1, uint32_t *data2)
 {
-    while ((*((volatile uint32_t *)0x50100000) & (1 << 12)) != 1 << 12) {}
+    uint8_t *frame_buffer;
+    uint32_t imgLen;
+    uint32_t w, h, x, y;
+    uint8_t *ptr0;
+    uint8_t *ptr1;
+    uint8_t *ptr2;
+    uint8_t *buffer;
 
-    CNN_COMPLETE;
-    cnn_time = MXC_TMR_SW_Stop(MXC_TMR0);
+    camera_get_image(&frame_buffer, &imgLen, &w, &h);
+    ptr0 = (uint8_t *)data0;
+    ptr1 = (uint8_t *)data1;
+    ptr2 = (uint8_t *)data2;
+    buffer = frame_buffer;
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++, ptr0++, ptr1++, ptr2++) {
+            *ptr0 = (*buffer);
+            buffer++;
+            *ptr1 = (*buffer);
+            buffer++;
+            *ptr2 = (*buffer);
+            buffer++;
+
+            buffer++; //MSB is zero
+        }
+    }
 }
 
-uint32_t utils_get_time_ms(void)
+/* **************************************************************************** */
+void capture_camera_img(void)
 {
-    uint32_t sec, ssec;
-    double subsec;
-    uint32_t ms;
-    MXC_RTC_GetSubSeconds(&ssec);
-    subsec = ssec / 4096.0;
-    MXC_RTC_GetSeconds(&sec);
+    camera_start_capture_image();
+    while (1) {
+        if (camera_is_image_rcv()) {
+            return;
+        }
+    }
+}
 
-    ms = (sec * 1000) + (int)(subsec * 1000);
+/* **************************************************************************** */
+void convert_img_unsigned_to_signed(uint32_t *data0, uint32_t *data1, uint32_t *data2)
+{
+    uint8_t *ptr0;
+    uint8_t *ptr1;
+    uint8_t *ptr2;
+    ptr0 = (uint8_t *)data0;
+    ptr1 = (uint8_t *)data1;
+    ptr2 = (uint8_t *)data2;
+    for (int i = 0; i < 4096; i++) {
+        *ptr0 = unsigned_to_signed(*ptr0);
+        ptr0++;
+        *ptr1 = unsigned_to_signed(*ptr1);
+        ptr1++;
+        *ptr2 = unsigned_to_signed(*ptr2);
+        ptr2++;
+    }
+}
 
-    return ms;
+/* **************************************************************************** */
+void convert_img_signed_to_unsigned(uint32_t *data0, uint32_t *data1, uint32_t *data2)
+{
+    uint8_t *ptr0;
+    uint8_t *ptr1;
+    uint8_t *ptr2;
+    ptr0 = (uint8_t *)data0;
+    ptr1 = (uint8_t *)data1;
+    ptr2 = (uint8_t *)data2;
+    for (int i = 0; i < 4096; i++) {
+        *ptr0 = signed_to_unsigned(*ptr0);
+        ptr0++;
+        *ptr1 = signed_to_unsigned(*ptr1);
+        ptr1++;
+        *ptr2 = signed_to_unsigned(*ptr2);
+        ptr2++;
+    }
 }
 
 int main(void)
 {
-#ifdef TFT_ENABLE
-    char buff[TFT_BUFF_SIZE];
-#endif
-    static uint32_t t1, t2, t3, t4, t5, t6;
+    int i, dma_channel;
+    int digs, tens;
+    int ret = 0;
 
-#if defined(BOARD_FTHR_REVA)
-    // wait for pmic 1.8V to become available, approx 180ms after power up
     MXC_Delay(200000);
     Camera_Power(POWER_ON);
-#endif
+    printf("\n\nMNIST Demo\n");
 
     MXC_ICC_Enable(MXC_ICC0);
 
-    // switch to 100 MHz clock
     MXC_SYS_Clock_Select(MXC_SYS_CLOCK_IPO);
     SystemCoreClockUpdate();
 
     printf("Waiting...\n");
 
-    // init RTC
-    MXC_RTC_Init(0, 0);
-    MXC_RTC_Start();
-
-    // DO NOT RM THIS LINE:
+    // do not remove!!!
     MXC_Delay(SEC(2)); 
 
-    // config P2.5, BOOST
+    cnn_enable(MXC_S_GCR_PCLKDIV_CNNCLKSEL_PCLK, MXC_S_GCR_PCLKDIV_CNNCLKDIV_DIV1);
+
+    // CNN boost (P2.5)
     mxc_gpio_cfg_t gpio_out;
     gpio_out.port = MXC_GPIO2;
     gpio_out.mask = MXC_GPIO_PIN_5;
@@ -239,130 +290,81 @@ int main(void)
     MXC_GPIO_OutSet(gpio_out.port, gpio_out.mask);
 
 #ifdef TFT_ENABLE
-    printf("LCD init...");
-
-#ifdef BOARD_EVKIT_V1
-    MXC_TFT_Init();
+    printf("Init LCD.\n");
 #endif
-
-#ifdef BOARD_FTHR_REVA
     MXC_TFT_Init(MXC_SPI0, 1, NULL, NULL);
     MXC_TFT_SetRotation(ROTATE_270);
-    MXC_TFT_SetForeGroundColor(WHITE); 
-#endif
-
-    memset(buff, 32, TFT_BUFF_SIZE);
-    TFT_Print(buff, 80, 30, font, snprintf(buff, sizeof(buff), "ADI             "));
-    TFT_Print(buff, 55, 50, font, snprintf(buff, sizeof(buff), "Demo      "));
-    TFT_Print(buff, 120, 90, font, snprintf(buff, sizeof(buff), "Ver. 1.1.0                   "));
-    MXC_Delay(SEC(2));
-
-#ifdef BOARD_EVKIT_V1
-    MXC_TFT_SetBackGroundColor(255);
-#endif
-
-#endif 
-
-    int xx = IMAGE_SIZE_X;
-    int yy = IMAGE_SIZE_Y;
-    printf("x %d  y %d\n", xx, yy);
-
-    int dma_channel;
-    printf("Init Camera...\n");
+    MXC_TFT_SetForeGroundColor(WHITE);
+    MXC_Delay(1000000);
 
     MXC_DMA_Init();
     dma_channel = MXC_DMA_AcquireChannel();
 
     camera_init(CAMERA_FREQ);
 
-#ifndef RGB565
-    int ret = camera_setup(IMAGE_SIZE_X, IMAGE_SIZE_Y, PIXFORMAT_RGB888, FIFO_THREE_BYTE, USE_DMA,
-                           dma_channel);
-#else
-    int ret = camera_setup(CAMERA_SIZE_X, CAMERA_SIZE_Y, PIXFORMAT_RGB565, FIFO_FOUR_BYTE,
-                           STREAMING_DMA, dma_channel);
-    // set camera clock prescaler to prevent streaming overflow due to TFT display latency
-
-#ifdef BOARD_EVKIT_V1
-    camera_write_reg(0x11, 0x3);
-#endif
-
-#ifdef BOARD_FTHR_REVA
-    camera_write_reg(0x11, 0x0);
-#endif
-
-#endif
-
+    ret = camera_setup(IMAGE_SIZE_X, IMAGE_SIZE_Y, PIXFORMAT_RGB888, FIFO_THREE_BYTE, USE_DMA,
+                       dma_channel);
     if (ret != STATUS_OK) {
-        printf("\tError in camera set up: %d\n", ret);
+        printf("Error returned from setting up camera. Error %d\n", ret);
         return -1;
     }
 
-    // NN clock: 50 MHz div 1
-    cnn_enable(MXC_S_GCR_PCLKDIV_CNNCLKSEL_PCLK, MXC_S_GCR_PCLKDIV_CNNCLKDIV_DIV1);
-    cnn_init();
-    cnn_load_weights();
-
 #ifdef TFT_ENABLE
-    MXC_TFT_ClearScreen();
+    MXC_TFT_SetBackGroundColor(4);
+    memset(buff, ' ', TFT_BUFF_SIZE);
 #endif
 
     while (1) {
+        printf("********** PB1(SW1) to capture an image **********\r\n");
+        while (!PB_Get(0)) {}
 
-        printf("Proc...\n");
-        t1 = utils_get_time_ms();
-
-        cnn_init(); 
-        cnn_load_bias();
-        cnn_configure(); 
-
-        load_input_RGB565();
-
-        t2 = utils_get_time_ms();
-
-        LED_On(LED1);
-
-        cnn_start(); 
-
-#if defined(TFT_ENABLE) && defined(RGB565)
-        display_camera_RGB565();
+#ifdef TFT_ENABLE
+        MXC_TFT_ClearScreen();
 #endif
 
-        t3 = utils_get_time_ms();
+        capture_camera_img();
 
-        while (cnn_time == 0) {
-            __WFI(); 
-        }
+        process_camera_img(input_0_camera, input_1_camera, input_2_camera);
 
-        t4 = utils_get_time_ms();
+#ifdef TFT_ENABLE
+        MXC_TFT_ClearScreen();
+        TFT_Print(buff, 10, 30, font_2, snprintf(buff, sizeof(buff), "Camera (64x64)"));
+        lcd_show_sampledata(input_0_camera, input_1_camera, input_2_camera, 25, 85, 1024);
+#endif
 
-        LED_Off(LED1);
+        cnn_init();
+        cnn_load_weights();
+        cnn_load_bias();
+        cnn_configure();
 
-        t5 = utils_get_time_ms();
+        #if USE_CAMERA_INPUT
+        capture_camera_img();   // get a fresh frame first
+        #endif
 
-        printf("here\n");
+        load_input();    
+        cnn_start();          
+        SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk; // SLEEPDEEP=0
+        while (cnn_time == 0) __WFI();
         softmax_layer();
-        printf("but not here\n");
+
+        printf("Approx CNN time: %d us\n\n", cnn_time);
 
         cnn_disable();
 
-        t6 = utils_get_time_ms();
-
-        printf("CNN time: %d us\n", cnn_time);
-
-        printf("load:%d TFT:%d cnn_wait:%d cnn_unload:%d pproc:%d Total:%dms\n", t2 - t1,
-               t3 - t2, t4 - t3, t5 - t4, t6 - t5, t6 - t1);
-        MXC_Delay(SEC(1));
-
-        printf("Out:\n");
-        int digs, tens;
-        for (int i = 0; i < CNN_NUM_OUTPUTS; i++) {
+        int best_i = 0;
+        q15_t best_v = ml_softmax[0];
+        printf("Outs (w softmax):\n");
+        for (i = 0; i < CNN_NUM_OUTPUTS; i++) {
             digs = (1000 * ml_softmax[i] + 0x4000) >> 15;
             tens = digs % 10;
             digs = digs / 10;
-            printf("[%7d] -> class %d: %d.%d%%\n", ml_data[i], i, digs, tens);
+            printf("[%7d] -> Class %d: %d.%d%%\n", ml_data[i], i, digs, tens);
         }
 
+#ifdef TFT_ENABLE
+        TFT_Print(buff, 5, 5, font_2, snprintf(buff, sizeof(buff), "Pred: %s", classes[best_i]));
+        TFT_Print(buff, 5, 210, font_2, snprintf(buff, sizeof(buff), "PRESS PB1(SW1) TO CAPTURE"));
+#endif
     }
 
     return 0;

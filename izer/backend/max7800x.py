@@ -21,11 +21,76 @@ from izer import tornadocnn as tc
 from izer.eprint import eprint, nprint, wprint
 from izer.names import layer_pfx, layer_str
 from izer.simulate import (conv1d_layer, conv2d_layer, linear_layer, convtranspose2d_layer, eltwise_layer,
-                           passthrough_layer, pooling_layer, mhsa_layer, layernorm_layer, patch_embed_layer, print_data, show_data)
+                           passthrough_layer, pooling_layer, mhsa_layer, layernorm_layer, print_data, show_data)
 from izer.utils import ffs, fls, overlap, plural, popcount
 
 from . import backend
 
+###############################################################################################
+def select_cls_and_head(
+        layer, data, head_weight, head_bias,
+        bits=8, head_output_shift=0, output_width=32):
+    """
+    data: (S,D) or (D,S) or (D,S,1) after final LayerNorm
+    returns logits as (C,1,1) to match output convention
+    """
+
+    # normalize to (D,S)
+    if data.ndim == 3 and data.shape[-1] == 1:      # (D,S,1)
+        data = data[:, :, 0]
+    if data.ndim == 2 and data.shape[0] == head_weight.shape[1]:
+        pass                                        # (D,S)
+    elif data.ndim == 2 and data.shape[1] == head_weight.shape[1]:
+        data = data.T                               # (S,D) -> (D,S)
+    else:
+        raise ValueError(f"select_cls_and_head: unexpected data shape {data.shape} for head in_features={head_weight.shape[1]}")
+
+    D = head_weight.shape[1]
+    if data.shape[0] != D:
+        raise ValueError(f"select_cls_and_head: D mismatch: data has {data.shape[0]}, head expects {D}")
+
+    # CLS is token 0 in sequence dimension -> (D,)
+    cls_vec = data[:, 0]
+    cls_hw = cls_vec.reshape(D, 1, 1)               # (C=D, W=1, 1)
+
+    out_hw, _ = linear_layer(
+        layer=layer,
+        activation=None,
+        weight=head_weight,      # (C, D)
+        bias=head_bias,          # (C,)
+        data=cls_hw,             # (D,1,1)
+        bits=bits,
+        output_shift=head_output_shift)
+    return out_hw, out_hw.shape                      # (C,1,1)
+
+# --- residual helpers ---
+_residual_stack = {}
+
+def _push_residual(key, tensor):
+    _residual_stack[key] = np.array(tensor, copy=True)
+
+def _pop_residual(key):
+    return _residual_stack.pop(key, None)
+
+def _add_residual(a, b):
+    # a, b as (D,S) or (S,D) or (D,S,1). We normalize to (D,S) then add.
+    if a.ndim == 3 and a.shape[-1] == 1: a = a[:, :, 0]
+    if b.ndim == 3 and b.shape[-1] == 1: b = b[:, :, 0]
+    if a.ndim == 2 and b.ndim == 2:
+        if a.shape[0] == b.shape[0]:
+            out = a + b
+        elif a.shape[1] == b.shape[0]:   # a is (S,D), b is (D,S)
+            out = a.T + b
+        elif a.shape[0] == b.shape[1]:
+            out = a + b.T
+        else:
+            raise ValueError(f"residual add shape mismatch: {a.shape} vs {b.shape}")
+        # clip back to int8 domain
+        return np.clip(out.astype(np.int16), -128, 127).astype(np.int8)
+    else:
+        raise ValueError(f"residual add expects rank-2/3, got {a.ndim}, {b.ndim}")
+
+###############################################################################################
 
 class Backend(backend.Backend):
     """
@@ -3054,6 +3119,8 @@ class Backend(backend.Backend):
                                 f'Expected: {in_chan}x{pooled_dim[ll][0]}, '
                                 f'got {out_size[0]}x{out_size[1]}.')    
                     elif buffer_shift[ll] is None:
+                        print('here')
+                        print(data.shape)
                         if out_size[0] != in_chan or out_size[1] != pooled_dim[ll][0] or out_size[2] != pooled_dim[ll][1]:
                             eprint(f'{layer_pfx(ll)}Input dimensions do not match. '
                                 f'Expected: {in_chan}x{pooled_dim[ll][0]}x{pooled_dim[ll][1]}, '
@@ -3131,19 +3198,21 @@ class Backend(backend.Backend):
                         output_chan[ll],
                         in_chan
                     )
-                    out_list = []
+
                     if ll == final_layer:
-                        # Only run linear once on CLS token
-                        token = data[:, 0]  # shape (64,)
-                        out_token, _ = linear_layer(
-                            ll,
-                            activation[ll],
-                            k,
-                            bias[bias_ptrs[ll]],
-                            token
+                        # --- head (CLS-only) ---
+                        out_buf, out_size = select_cls_and_head(
+                            layer=ll,
+                            data=data,
+                            head_weight=k,
+                            head_bias=bias[bias_ptrs[ll]],
+                            bits=8,
+                            head_output_shift=output_shift[ll],
+                            output_width=output_width[ll],
                         )
-                        out_buf = out_token  # shape (10,)
                     else:
+                        # --- FFN linears (token-wise) ---
+                        out_list = []
                         for i in range(data.shape[1]):
                             token = data[:, i]
                             out_token, _ = linear_layer(
@@ -3151,11 +3220,18 @@ class Backend(backend.Backend):
                                 activation[ll],
                                 k,
                                 bias[bias_ptrs[ll]],
-                                token
+                                token,
+                                output_shift[ll]
                             )
                             out_list.append(out_token)
                         out_buf = np.stack(out_list, axis=1)
-                    out_size = out_buf.shape
+                        out_size = out_buf.shape
+
+                        skip = _pop_residual(ll)
+                        if skip is not None:
+                            out_buf = _add_residual(out_buf, skip)
+                            out_size = out_buf.shape
+
                     print(f"LINEAR OUT SIZE {out_size}")
                 
                 ############################################################################
@@ -3246,8 +3322,13 @@ class Backend(backend.Backend):
                         d_model = d_model[ll], 
                         seq_length=seq_length[ll], 
                     )
+                    skip = _pop_residual(ll)         # the LN stored it for this layer
+                    if skip is not None:
+                        out_buf = _add_residual(out_buf, skip)
+                        out_size = out_buf.shape
                     # print(f"MHSA OUT SIZE {out_size}")
                 elif operator[ll] == op.LAYER_NORM:
+                    pre_ln = np.array(data, copy=True)
                     out_buf, out_size = layernorm_layer(
                         ll,
                         data.shape,
@@ -3258,16 +3339,15 @@ class Backend(backend.Backend):
                         output_width=output_width[ll],
                         n_channels_out=output_chan[ll]
                     )
+                    nxt  = operator[ll + 1] if (ll + 1) < layers else None
+                    nxt2 = operator[ll + 2] if (ll + 2) < layers else None
+                    if nxt == op.MHSA:
+                        _push_residual(ll + 1, pre_ln)         # consumed by MHSA at layer (ll+1)
+                    elif nxt == op.LINEAR and nxt2 == op.LINEAR:
+                        _push_residual(ll + 2, pre_ln)         # consumed by FFN second linear (ll+2)
+                    else:
+                        _push_residual(ll + 1, pre_ln)         # safe fallback
                     # print(f"LAYERNORM OUT SIZE {out_size}")
-                # elif operator[ll] == op.PATCH_EMBED:
-                #     out_buf, out_size = patch_embed_layer(
-                #         ll,
-                #         data.shape,
-                #         kernel[kernel_ptrs[ll]],
-                #         bias[bias_ptrs[ll]],
-                #         data,
-                #         output_width=output_width[ll],
-                #     )
 ###################################################################################################
                 else:
                     eprint(f'Unknown operator `{op.string(operator[ll])}`.')
